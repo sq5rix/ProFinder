@@ -4,7 +4,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { getFallbackProperties } from './server/fallbackProperties.ts';
 import { resolvePropertyCoordinates } from './src/utils/geocoding.ts';
-import { resolveDirectPropertyUrl, isSpecificPropertyUrl } from './src/utils/urlValidator.ts';
+import { resolveDirectPropertyUrl, isSpecificPropertyUrl, isValidPolishPhoneNumber, formatPolishPhoneNumber } from './src/utils/urlValidator.ts';
 import { verifyPropertiesLive, verifyUrlLive } from './server/liveUrlVerifier.ts';
 
 const ai = new GoogleGenAI({
@@ -73,21 +73,28 @@ function cleanSingleOfferDescription(rawDesc: any): string {
   return text;
 }
 
-// Helper to extract Polish phone numbers from text
+// Helper to extract authentic Polish phone numbers from text - STRICT: rejects masked 'xxx'
 function extractPolishPhoneNumber(text: string): string | null {
   if (!text || typeof text !== 'string') return null;
+  // If the text contains any masking characters, it is NOT an authentic phone number
+  if (/[xX*•_?]/.test(text)) return null;
+  if (/pokaż|ukryt|brak|zobacz|ogłoszeni|sprawdź|w serwisie/i.test(text)) return null;
+
   // Match Polish phone formats: +48 XXX XXX XXX, XXX-XXX-XXX, XXX XXX XXX, etc.
   const match = text.match(/(?:(?:\+|00)?48[\s.-]?)?(?:[1-9]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}|[1-9]\d{1}[\s.-]?\d{3}[\s.-]?\d{2}[\s.-]?\d{2}|[1-9]\d{8})/);
   if (match) {
     const raw = match[0].replace(/[^\d+]/g, '');
+    let candidate = '';
     if (raw.startsWith('+48') && raw.length === 12) {
-      return `+48 ${raw.slice(3, 6)} ${raw.slice(6, 9)} ${raw.slice(9, 12)}`;
+      candidate = `+48 ${raw.slice(3, 6)} ${raw.slice(6, 9)} ${raw.slice(9, 12)}`;
     } else if (raw.startsWith('48') && raw.length === 11) {
-      return `+48 ${raw.slice(2, 5)} ${raw.slice(5, 8)} ${raw.slice(8, 11)}`;
+      candidate = `+48 ${raw.slice(2, 5)} ${raw.slice(5, 8)} ${raw.slice(8, 11)}`;
     } else if (raw.length === 9) {
-      return `+48 ${raw.slice(0, 3)} ${raw.slice(3, 6)} ${raw.slice(6, 9)}`;
+      candidate = `+48 ${raw.slice(0, 3)} ${raw.slice(3, 6)} ${raw.slice(6, 9)}`;
     }
-    return match[0].trim();
+    if (candidate && isValidPolishPhoneNumber(candidate)) {
+      return candidate;
+    }
   }
   return null;
 }
@@ -141,20 +148,33 @@ function finalCheckAndNormalizeProperty(prop: any, pIdx: number): any {
   let location = (prop.location || '').trim();
   if (!location) location = 'Polska';
 
-  // 7. Phone number normalization & detection
+  // 7. Phone number normalization & detection - STRICT ANTI-MASKING
   let contact = (prop.contact || '').trim();
   const desc = (prop.description || '');
   const titleText = (prop.title || '');
-  const phone = extractPolishPhoneNumber(contact) || extractPolishPhoneNumber(desc) || extractPolishPhoneNumber(titleText);
-  let hasPhoneNumber = Boolean(prop.hasPhoneNumber || phone);
+  const rawPhone = (prop.phoneNumber || '').trim();
 
+  // Try extracting from all potential fields, strictly checking for valid 9-digit Polish number
+  let phone = extractPolishPhoneNumber(rawPhone) || 
+              extractPolishPhoneNumber(contact) || 
+              extractPolishPhoneNumber(desc) || 
+              extractPolishPhoneNumber(titleText);
+
+  // If candidate contains any masking ('xxx', '*', etc.) or is not a valid Polish phone, discard it
+  if (phone && !isValidPolishPhoneNumber(phone)) {
+    phone = null;
+  }
+
+  // Clean contact field if it has masked numbers like "502 xxx xxx"
+  if (contact && (/[xX*•_?]/.test(contact) || contact.toLowerCase().includes('pokaż'))) {
+    contact = 'Kontakt w ogłoszeniu na portalu';
+  }
+
+  const hasPhoneNumber = Boolean(phone);
   if (phone) {
-    hasPhoneNumber = true;
-    if (!contact || contact.toLowerCase() === 'w ogłoszeniu' || contact === 'N/A' || !extractPolishPhoneNumber(contact)) {
-      contact = `Tel: ${phone}`;
-    }
-  } else if (!contact) {
-    contact = 'W ogłoszeniu';
+    contact = `Tel: ${phone}`;
+  } else if (!contact || contact === 'W ogłoszeniu' || contact === 'N/A') {
+    contact = 'Kontakt w ogłoszeniu na portalu';
   }
 
   // 8. Coordinates resolution
@@ -163,10 +183,14 @@ function finalCheckAndNormalizeProperty(prop: any, pIdx: number): any {
   const longitude = coords ? coords.lng : undefined;
 
   // 9. Single-Property URL Verification and Anti-Cheat Protection
-  // Big portals (Otodom, OLX, Morizon, Gratka) frequently cheat by returning category or multi-listing pages.
-  // We strictly resolve and sanitize the URL so it points exclusively to this individual property.
+  // Guarantee that links point strictly to genuine portal listings, NEVER to Google Search!
+  let rawPropUrl = (prop.url || '').trim();
+  if (rawPropUrl.toLowerCase().includes('google.com/search') || rawPropUrl.toLowerCase().includes('google.')) {
+    rawPropUrl = '';
+  }
+
   const urlCheck = resolveDirectPropertyUrl({
-    url: prop.url,
+    url: rawPropUrl,
     title,
     location,
     source: prop.source
@@ -287,13 +311,15 @@ Znajdź rzeczywiste oferty odpowiadające podanej lokalizacji, cenie, metrażowi
 
 ★★★ KLUCZOWY PRIORYTET: WYBIERAJ I PREFERUJ OGŁOSZENIA Z NUMEREM TELEFONU (PRIORITIZE ADS WITH DIRECT PHONE NUMBERS) ★★★
 1. Użytkownik chce natychmiast zadzwonić do oferenta (właściciela lub agenta).
-2. BEZWZGLĘDNIE DAJ NAJWYŻSZY PRIORYTET ogłoszeniom, które zawierają bezpośredni numer telefonu kontaktowego (np. "+48 501 234 567", "600 123 456", "791-234-567", "tel. 505 111 222").
-3. Aktywnie przeszukuj treść ogłoszeń, nagłówki, treść opisu oraz pola kontaktowe na portalach takich jak Otodom czy OLX, aby wyodrębnić prawdziwy numer telefonu.
-4. Dla każdego ogłoszenia z numerem telefonu:
-   - W polu "contact" wpisz ten numer (np. "+48 501 234 567" lub "+48 600 123 456 - Właściciel").
-   - Ustaw pole "hasPhoneNumber": true.
-5. Ogłoszenia z jawnym numerem telefonu kontaktowego UMIEŚĆ NA SAMYM POCZĄTKU listy zwracanych wyników.
-6. Dopiero gdy brakuje ogłoszeń z telefonem, uzupełnij listę pozostałymi najlepszymi ofertami z portali (oznaczając dla nich "hasPhoneNumber": false).
+2. BEZWZGLĘDNIE DAJ NAJWYŻSZY PRIORYTET ogłoszeniom, które zawierają bezpośredni, JAWNY numer telefonu kontaktowego (np. "+48 501 234 567", "600 123 456", "791-234-567", "tel. 505 111 222").
+3. ★★★ KATEGORYCZNY ZAKAZ ZAMASKOWANYCH NUMERÓW Z "XXX" LUB "***" ★★★
+   - Portale często maskują numery jako "502 xxx xxx", "601-xxx-xxx", "***" lub przycisk "Pokaż numer".
+   - NIGDY, POD ŻADNYM POZOREM NIE PODAWAJ NUMERU Z "xxx", "XXX", "*" ANI "..."!
+   - Zamaskowany numer to NIE jest numer telefonu.
+   - Jeśli numer jest zamaskowany lub ukryty: ustaw "phoneNumber": null, "hasPhoneNumber": false, a w polu "contact" wpisz "W ogłoszeniu na portalu".
+   - Pole "phoneNumber" i "hasPhoneNumber": true wolno ustawić WYŁĄCZNIE wtedy, gdy znasz w 100% pełny, jawny, 9-cyfrowy prawdziwy numer telefonu!
+4. Ogłoszenia z jawnym, pełnym numerem telefonu kontaktowego UMIEŚĆ NA SAMYM POCZĄTKU listy zwracanych wyników.
+5. Dopiero gdy brakuje ogłoszeń z jawnym telefonem, uzupełnij listę pozostałymi najlepszymi ofertami z portali (oznaczając dla nich "hasPhoneNumber": false, "phoneNumber": null).
 
 KATEGORYCZNA ZASADA: DOKŁADNIE JEDNA OFERTA NA JEDEN BOKS OPISU (ONE OFFER PER DESCRIPTION BOX):
 - Każdy obiekt w zwracanej tablicy JSON reprezentuje DOKŁADNIE JEDNĄ, autonomiczną nieruchomość.
@@ -309,6 +335,7 @@ KRYTYCZNA UWAGA: Portale takie jak Otodom.pl natychmiast przekierowują użytkow
 - MORIZON: format "https://www.morizon.pl/oferta/[slug]-ID[kod].html"
 - GRATKA: format "https://gratka.pl/nieruchomosci/[slug]/ob/[id]"
 - Jeśli nie znasz dokładnego URL z identyfikatorem ID danej oferty, podaj dokładny URL bezpośrednio ze zwróconych źródeł wyszukiwania Google (groundingChunks).
+- ★★★ KATEGORYCZNY ZAKAZ GOOGLE SEARCH ★★★: Pole "url" musi być bezpośrednim adresem URL na portalu nieruchomości. NIGDY nie podawaj adresu "https://www.google.com/search..." ani żadnej innej wyszukiwarki!
 
 Dla każdej oferty podaj szczegóły w języku polskim:
 - title: tytuł ogłoszenia
@@ -323,9 +350,10 @@ Dla każdej oferty podaj szczegóły w języku polskim:
 - floor: piętro (np. "3/5 piętro", "parter", "dom", "N/A")
 - description: 2-3 zdania opisu wyłącznie tej jednej nieruchomości (standard, meble, stan, ekspozycja, okolica)
 - source: nazwa portalu (np. "Otodom", "OLX", "Morizon", "Nieruchomości-online", "Gratka")
-- url: BEZPOŚREDNI link URL wyłącznie do tej JEDNEJ konkretnej prezentowanej oferty nieruchomości (z prawdziwym ID oferty). KATEGORYCZNY ZAKAZ: Nigdy nie podawaj linków do stron kategorii, list wszystkich ofert, ani linków 404.
-- contact: bezpośredni numer telefonu (np. "+48 501 234 567", "Tel: 602 123 456"), agent z telefonem lub "W ogłoszeniu"
-- hasPhoneNumber: boolean (true jeśli ogłoszenie zawiera bezpośredni numer telefonu, false w przeciwnym razie)
+- url: BEZPOŚREDNI link URL na portalu nieruchomości do tej JEDNEJ oferty (Otodom, OLX, itp. - NIGDY Google Search).
+- contact: pełny, jawny numer telefonu (np. "+48 501 234 567") LUB "W ogłoszeniu na portalu". NIGDY ZAMASKOWANY Z XXX!
+- hasPhoneNumber: boolean (true WYŁĄCZNIE jeśli znasz pełny 9-cyfrowy numer telefonu, false jeśli zamaskowany lub brak)
+- phoneNumber: pełny numer telefonu (np. "+48 501 234 567") LUB null jeśli zamaskowany/brak. NIGDY z xxx!
 - features: lista udogodnień (np. ["Balkon", "Winda", "Garaż", "Klimatyzacja"])
 
 Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, aby ogłoszenia z numerem telefonu były na samym początku).`;
@@ -409,14 +437,21 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
         url: w.uri
       }));
 
-    // Find all real specific single-offer URIs captured in Google Search grounding
+    // Find all real specific single-offer URIs captured in Google Search grounding (excluding Google Search URLs)
     const specificOfferUris = rawChunks
       .map((chunk: any) => chunk?.web?.uri)
-      .filter((uri: string) => Boolean(uri) && !isGenericListingUrl(uri));
+      .filter((uri: string) => Boolean(uri) && 
+        !uri.toLowerCase().includes('google.com/search') && 
+        !uri.toLowerCase().includes('google.') && 
+        !isGenericListingUrl(uri)
+      );
 
-    // Ensure every property's url is strictly for that displayed property, not for all
+    // Ensure every property's url is strictly for that displayed property, on real portals
     properties = properties.map((prop: any, pIdx: number) => {
       let link = typeof prop.url === 'string' ? prop.url.trim() : '';
+      if (link.toLowerCase().includes('google.com/search') || link.toLowerCase().includes('google.')) {
+        link = '';
+      }
       let isDirect = isSpecificPropertyUrl(link);
 
       // If the model returned an invalid / generic / 404 trap URL, match a single-offer URL from grounding
@@ -440,7 +475,7 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
         }
       }
 
-      // If still not a direct link to this specific offer with valid ID, sanitize via resolveDirectPropertyUrl
+      // If still not a direct link, resolveDirectPropertyUrl guarantees a clean portal link (never Google Search)
       if (!isDirect) {
         const sanitized = resolveDirectPropertyUrl({
           url: link,

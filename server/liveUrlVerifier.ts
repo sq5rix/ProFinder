@@ -51,6 +51,20 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
 
   // Pre-check for known trap patterns
   const lowerUrl = urlToCheck.toLowerCase();
+  if (lowerUrl.includes('google.com/search') || lowerUrl.includes('google.') || lowerUrl.includes('bing.com')) {
+    return {
+      url: urlToCheck,
+      isLive: false,
+      status: 400,
+      finalUrl: urlToCheck,
+      isArchived: false,
+      isTrap: true,
+      statusLabel: 'error',
+      message: 'Wykryto link do wyszukiwarki Google zamiast do portalu nieruchomości',
+      checkedAt: now
+    };
+  }
+
   if (lowerUrl.includes('from404') || lowerUrl.includes('cala-polska') || lowerUrl.includes('/wyniki/')) {
     return {
       url: urlToCheck,

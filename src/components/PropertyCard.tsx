@@ -17,7 +17,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { Property, LiveVerificationInfo } from '../types';
-import { resolveDirectPropertyUrl } from '../utils/urlValidator';
+import { resolveDirectPropertyUrl, isValidPolishPhoneNumber, formatPolishPhoneNumber } from '../utils/urlValidator';
 
 interface PropertyCardProps {
   key?: Key;
@@ -55,9 +55,21 @@ export function PropertyCard({ property, index, isSelected, onShowOnMap }: Prope
 
   const singleOfferDescription = getSingleOfferDescription(property.description);
 
-  // Enforce that the link points exclusively to this individual property ad, never a category/aggregator cheat page
+  // Phone validation: verify number is complete and contains NO 'xxx', '*', or masking
+  const isRealPhone = Boolean(
+    property.phoneNumber && isValidPolishPhoneNumber(property.phoneNumber)
+  );
+  const formattedPhone = isRealPhone ? formatPolishPhoneNumber(property.phoneNumber) : null;
+  const rawDialNumber = isRealPhone && property.phoneNumber ? property.phoneNumber.replace(/[^\d+]/g, '') : null;
+
+  // Enforce that the link points exclusively to this individual property ad on real portals (NEVER Google Search)
   const urlCheck = resolveDirectPropertyUrl(property);
-  const offerUrl = urlCheck.url;
+  let offerUrl = urlCheck.url;
+  if (offerUrl.toLowerCase().includes('google.com/search') || offerUrl.toLowerCase().includes('google.')) {
+    offerUrl = property.source?.toLowerCase().includes('olx') 
+      ? 'https://www.olx.pl/nieruchomosci/' 
+      : 'https://www.otodom.pl';
+  }
 
   const checkLiveAvailability = async () => {
     setIsVerifying(true);

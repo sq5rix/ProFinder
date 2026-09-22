@@ -1,15 +1,11 @@
 /**
- * Dedicated URL Validator & Sanitizer for Polish Real Estate Portals.
+ * Dedicated URL & Phone Validator for Polish Real Estate Portals.
  * 
- * Big property portals (especially Otodom, OLX, Morizon, Gratka, Nieruchomości-online)
- * aggressively push category pages, multi-property listing aggregators, or 404 redirect traps
- * (e.g., Otodom's notorious "https://www.otodom.pl/pl/wyniki/sprzedaz/mieszkanie/cala-polska#from404").
- * 
- * Any Otodom URL without a genuine offer ID (-ID[alphanumeric]) gets 301/302 redirected
- * by Otodom's servers directly to the starting page of all offers in entire Poland (#from404)!
- * 
- * This module strictly verifies if a URL is an authentic, single-property ad page with a valid ID,
- * and sanitizes any aggregator cheat URLs into direct single-offer targets.
+ * Guarantees that:
+ * 1. Links ALWAYS point to real property portal websites (Otodom, OLX, Morizon, Gratka, etc.)
+ *    and NEVER to Google Search (google.com/search).
+ * 2. Phone numbers with masks ("502 xxx xxx", "601-xxx-xxx", "***", "Pokaż numer")
+ *    are strictly rejected and never displayed as callable numbers.
  */
 
 export interface UrlCheckResult {
@@ -21,8 +17,51 @@ export interface UrlCheckResult {
 }
 
 /**
- * Validates whether a given URL points strictly to a single, standalone property listing
- * with an authentic offer ID, rather than a category, search results, or 404 redirect trap.
+ * Validates whether a phone number is an authentic, complete Polish phone number
+ * and NOT a masked placeholder (e.g. containing 'xxx', 'XXX', '*', '•', or hidden behind 'Pokaż numer').
+ */
+export function isValidPolishPhoneNumber(phone?: string | null): boolean {
+  if (!phone || typeof phone !== 'string') return false;
+  const trimmed = phone.trim();
+  
+  // If it contains any masked characters or placeholder text, it is completely INVALID
+  if (/[xX*•_?]/.test(trimmed)) return false;
+  if (/pokaż|ukryt|brak|zobacz|ogłoszeni|sprawdź|w serwisie/i.test(trimmed)) return false;
+
+  // Extract pure digits
+  const digits = trimmed.replace(/\D/g, '');
+
+  // Standard 9-digit Polish number (e.g. 501234567, 221234567)
+  if (digits.length === 9) {
+    return /^[1-9]\d{8}$/.test(digits);
+  }
+
+  // 11 digits starting with Polish country code 48 (e.g. 48501234567)
+  if (digits.length === 11 && digits.startsWith('48')) {
+    return /^48[1-9]\d{8}$/.test(digits);
+  }
+
+  return false;
+}
+
+/**
+ * Formats a valid Polish phone number into clean "+48 XXX XXX XXX" format.
+ * Returns null if the number is masked with xxx or invalid.
+ */
+export function formatPolishPhoneNumber(phone?: string | null): string | null {
+  if (!phone || !isValidPolishPhoneNumber(phone)) return null;
+  const digits = phone.replace(/\D/g, '');
+  const localDigits = digits.length === 11 && digits.startsWith('48') ? digits.slice(2) : digits;
+  if (localDigits.length === 9) {
+    return `+48 ${localDigits.slice(0, 3)} ${localDigits.slice(3, 6)} ${localDigits.slice(6, 9)}`;
+  }
+  return null;
+}
+
+/**
+ * Validates whether a given URL points to a property listing on an authentic portal,
+ * rather than a search aggregator trap or 404 redirect.
+ * CRITICAL: Under NO circumstances is Google Search considered a property URL.
  */
 export function isSpecificPropertyUrl(rawUrl?: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') return false;
@@ -31,13 +70,12 @@ export function isSpecificPropertyUrl(rawUrl?: string): boolean {
 
   const lower = url.toLowerCase();
 
-  // If it's our direct targeted search query, it's explicitly engineered to hit the single ad
-  if (lower.includes('google.com/search') && lower.includes('site:')) {
-    return true;
+  // CATEGORICAL BAN: Google Search is NEVER a property listing URL
+  if (lower.includes('google.com/search') || lower.includes('google.') || lower.includes('bing.com')) {
+    return false;
   }
 
-  // 1. Definite Multi-Listing & Redirect-Trap Query Parameters, Substrings & Fragments
-  // Any occurrence of from404, cala-polska, wyniki, or search filters is an instant rejection
+  // Definite Multi-Listing & Redirect-Trap Query Parameters, Substrings & Fragments
   if (
     lower.includes('from404') ||
     lower.includes('#from404') ||
@@ -63,48 +101,22 @@ export function isSpecificPropertyUrl(rawUrl?: string): boolean {
     return false;
   }
 
-  // 2. Portal-Specific Direct Ad vs Category / 404 Cheat Checks
-
   // Otodom:
-  // Direct: /pl/oferta/[slug]-ID[alphanumeric] or /oferta/[slug]-ID[alphanumeric]
-  // CRITICAL: Otodom's router triggers 404 and redirects to:
-  // "https://www.otodom.pl/pl/wyniki/sprzedaz/mieszkanie/cala-polska#from404"
-  // whenever the URL lacks the authentic Otodom offer ID (-ID...) or is a category listing!
+  // Direct: /pl/oferta/[slug] or /oferta/[slug]
   if (lower.includes('otodom.pl')) {
-    // Immediate rejection of known Otodom category traps
     if (
       lower.includes('/wyniki') ||
-      lower.includes('/wynajem/') ||
-      lower.includes('/sprzedaz/') ||
-      lower.includes('/oferty/') ||
       lower.includes('/kategoria/') ||
-      lower.includes('/inwestycja/') ||
       lower.includes('cala-polska') ||
       lower.includes('from404')
     ) {
       return false;
     }
-
-    const hasOfferPath = lower.includes('/pl/oferta/') || lower.includes('/oferta/');
-    if (!hasOfferPath) return false;
-
-    // Must have a real Otodom offer ID (e.g. -ID4oMkp or -id4xyz or ID followed by digits/letters or 7+ digits)
-    // A synthetic slug without this ID causes Otodom to return 301/302 -> cala-polska#from404
-    const hasOtodomId = 
-      /-id[a-z0-9]+/i.test(lower) || 
-      /\/id[a-z0-9]{4,}/i.test(lower) || 
-      /id[a-z0-9]{5,}/i.test(lower) || 
-      /\d{7,}/.test(lower);
-
-    if (!hasOtodomId) {
-      return false;
-    }
-
-    return true;
+    return lower.includes('/pl/oferta/') || lower.includes('/oferta/');
   }
 
   // OLX:
-  // Direct: /d/oferta/[slug]-ID[alphanumeric].html or /oferta/[slug]-ID[alphanumeric].html
+  // Direct: /d/oferta/[slug] or /oferta/[slug]
   if (lower.includes('olx.pl')) {
     if (
       lower.includes('from404') ||
@@ -113,119 +125,54 @@ export function isSpecificPropertyUrl(rawUrl?: string): boolean {
     ) {
       return false;
     }
-    const hasOfferPath = lower.includes('/d/oferta/') || lower.includes('/oferta/');
-    if (!hasOfferPath) return false;
-    if (lower.includes('/nieruchomosci') && !hasOfferPath) return false;
-
-    // OLX listings always end with an ID or .html with numeric/alphanumeric code
-    const hasOlxId = 
-      /-id[a-z0-9]+/i.test(lower) || 
-      /\d{6,}/.test(lower) || 
-      /-cid\d+/i.test(lower) ||
-      /\.html$/.test(lower);
-
-    return hasOlxId;
+    return lower.includes('/d/oferta/') || lower.includes('/oferta/');
   }
 
   // Morizon:
-  // Direct: /oferta/[slug]-ID[alphanumeric].html or /oferta/[id]
+  // Direct: /oferta/[slug]
   if (lower.includes('morizon.pl')) {
-    if (
-      lower.includes('from404') ||
-      lower.includes('/do-wynajecia/') ||
-      lower.includes('/na-sprzedaz/') ||
-      lower.includes('/mieszkania/') ||
-      lower.includes('/domy/') ||
-      lower.includes('/pokoje/')
-    ) {
-      return false;
-    }
-    const hasOfferPath = lower.includes('/oferta/');
-    if (!hasOfferPath) return false;
-
-    const hasMorizonId = /\d{5,}/.test(lower) || /-id[a-z0-9]+/i.test(lower) || /morizon/i.test(lower);
-    return hasMorizonId;
+    if (lower.includes('from404') || lower.includes('/kategoria/')) return false;
+    return lower.includes('/oferta/');
   }
 
   // Gratka:
-  // Direct: contains /ob/ or numeric ad ID
+  // Direct: /ob/ or /oferta/
   if (lower.includes('gratka.pl')) {
     if (lower.includes('from404') || lower.includes('/kategoria/')) return false;
-    const isSingleAd = lower.includes('/ob/') || /\/ob\//.test(lower) || /\d{6,}/.test(lower);
-    if (lower.includes('/nieruchomosci/mieszkania') && !lower.includes('/ob/')) return false;
-    return isSingleAd;
+    return lower.includes('/ob/') || lower.includes('/oferta/');
   }
 
   // Nieruchomości-online:
-  // Direct: /oferta/ or /[digits].html or -[digits].html
   if (lower.includes('nieruchomosci-online.pl')) {
-    if (
-      lower.includes('from404') ||
-      lower.includes('szukaj.html') ||
-      lower.includes('mieszkania,wynajem') ||
-      lower.includes('mieszkania,sprzedaz')
-    ) {
-      return false;
-    }
-    const isSingleAd = lower.includes('/oferta/') || /\/\d{6,}\.html/.test(lower) || /-\d{6,}\.html/.test(lower);
-    return isSingleAd;
-  }
-
-  // Adresowo:
-  // Direct: /o/[slug]
-  if (lower.includes('adresowo.pl')) {
-    return lower.includes('/o/') && !lower.includes('/mieszkania/') && !lower.includes('/szukaj');
+    if (lower.includes('from404')) return false;
+    return lower.includes('/oferta/') || /\/\d{6,}\.html/.test(lower);
   }
 
   // Domiporta:
   if (lower.includes('domiporta.pl')) {
-    return /\/nieruchomosci\/.*\/(\d{5,})/.test(lower);
+    return lower.includes('/nieruchomosci/') || lower.includes('/oferta/');
   }
 
-  // 3. Generic Portal Category Trap Detection
-  const genericCategoryPatterns = [
-    '/wynajem/',
-    '/sprzedaz/',
-    '/do-wynajecia/',
-    '/na-sprzedaz/',
-    '/kategoria/',
-    '/katalog/',
-    '/lista/',
-    '/szukaj',
-    '/oferty/',
-    '/wyniki'
-  ];
-
-  for (const cat of genericCategoryPatterns) {
-    if (lower.includes(cat)) {
-      const hasOfferId = lower.includes('/oferta/') || lower.includes('/d/oferta/') || lower.includes('/ob/') || /\/\d{6,}/.test(lower);
-      if (!hasOfferId) {
-        return false;
-      }
-    }
+  // Adresowo:
+  if (lower.includes('adresowo.pl')) {
+    return lower.includes('/o/');
   }
 
-  // If it has explicit individual offer markers
-  if (
+  // Generic portal listing detection
+  return (
     lower.includes('/oferta/') ||
     lower.includes('/d/oferta/') ||
     lower.includes('/ogloszenie/') ||
     lower.includes('/ob/') ||
     lower.includes('/ad/') ||
-    lower.includes('/offer/') ||
-    /\/\d{6,}/.test(lower)
-  ) {
-    return true;
-  }
-
-  return false;
+    lower.includes('/offer/')
+  );
 }
 
 /**
- * Resolves a direct, single-property URL for an ad.
- * If the URL is already a verified direct ad URL with an authentic ID, it is preserved.
- * If the portal provided an aggregator/category cheat page or a 404 trap, it transforms it into
- * a laser-focused search URL that points directly and exclusively to that exact listing.
+ * Resolves the genuine property listing URL.
+ * Guarantees that the resulting URL is ALWAYS on a real Polish property portal (Otodom, OLX, Morizon, etc.)
+ * and NEVER redirects to Google Search.
  */
 export function resolveDirectPropertyUrl(property: {
   url?: string;
@@ -233,63 +180,56 @@ export function resolveDirectPropertyUrl(property: {
   location?: string;
   source?: string;
 }): UrlCheckResult {
-  const rawUrl = (property.url || '').trim();
+  let rawUrl = (property.url || '').trim();
 
-  if (isSpecificPropertyUrl(rawUrl)) {
+  // CATEGORICAL BAN: Never allow Google Search URLs
+  if (rawUrl.toLowerCase().includes('google.com/search') || rawUrl.toLowerCase().includes('google.')) {
+    rawUrl = '';
+  }
+
+  // If rawUrl is a valid http(s) URL on a property portal
+  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    // If it's the notorious Otodom 404 trap (cala-polska#from404), redirect to Otodom search for location
+    if (rawUrl.toLowerCase().includes('from404') || rawUrl.toLowerCase().includes('cala-polska')) {
+      const locSlug = (property.location || 'warszawa')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-');
+      return {
+        url: `https://www.otodom.pl/pl/oferty/wynajem/mieszkanie/${locSlug}`,
+        isDirectOffer: false,
+        wasSanitized: true,
+        originalUrl: rawUrl,
+        reason: 'Oryginalny link prowadził do błędu 404 Otodom (cala-polska#from404). Skierowano do portalu.'
+      };
+    }
+
     return {
       url: rawUrl,
-      isDirectOffer: true,
+      isDirectOffer: isSpecificPropertyUrl(rawUrl),
       wasSanitized: false
     };
   }
 
-  // It's a category/aggregator/404 cheat page!
-  // Sanitize it into a precision-targeted search query that forces Google to return ONLY the individual ad.
-  const title = (property.title || '').replace(/["'’]/g, '').trim();
-  const location = (property.location || '').trim();
+  // If no URL or invalid, point directly to the respective portal (NEVER Google Search!)
   const source = (property.source || '').toLowerCase();
-
-  // Extract clean keywords from title (skip Polish stop words to ensure high search precision)
-  const stopWords = new Set(['i', 'w', 'z', 'na', 'do', 'o', 'przy', 'dla', 'lub', 'albo', 'oraz', 'pod', 'nad', 'ze', 'od', 'po', 'mieszkanie', 'lokal']);
-  const cleanTitleWords = title
-    .replace(/[^\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ-]/gi, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()))
-    .slice(0, 4)
-    .join(' ');
-
-  let siteFilter = 'site:otodom.pl/pl/oferta/';
+  let portalUrl = 'https://www.otodom.pl';
   if (source.includes('olx')) {
-    siteFilter = 'site:olx.pl/d/oferta/';
+    portalUrl = 'https://www.olx.pl/nieruchomosci/';
   } else if (source.includes('morizon')) {
-    siteFilter = 'site:morizon.pl/oferta/';
+    portalUrl = 'https://www.morizon.pl';
   } else if (source.includes('gratka')) {
-    siteFilter = 'site:gratka.pl/nieruchomosci/ob/';
+    portalUrl = 'https://gratka.pl/nieruchomosci';
   } else if (source.includes('nieruchomosci-online')) {
-    siteFilter = 'site:nieruchomosci-online.pl';
-  } else if (source.includes('adresowo')) {
-    siteFilter = 'site:adresowo.pl/o/';
+    portalUrl = 'https://www.nieruchomosci-online.pl';
   }
-
-  // Target EXCLUSIVELY individual listing pages with site:portal/single-offer-path
-  // This guarantees Google NEVER returns the /wyniki/ or cala-polska starting page!
-  const queryParts = [siteFilter];
-  if (cleanTitleWords) {
-    queryParts.push(`"${cleanTitleWords}"`);
-  }
-  if (location) {
-    queryParts.push(location);
-  }
-
-  const directSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryParts.join(' '))}`;
 
   return {
-    url: directSearchUrl,
-    isDirectOffer: true,
+    url: portalUrl,
+    isDirectOffer: false,
     wasSanitized: true,
     originalUrl: rawUrl,
-    reason: rawUrl.includes('from404') || rawUrl.includes('cala-polska') || rawUrl.includes('wyniki')
-      ? 'Wykryto stronę zbiorczą/przekierowanie 404 portalu (cala-polska). Link zabezpieczono bezpośrednio do pojedynczego ogłoszenia.'
-      : 'Brak unikalnego ID ogłoszenia w URL (ochrona przed błędem 404 i stroną zbiorczą). Skierowano do oferty bezpośredniej.'
+    reason: 'Przekierowano bezpośrednio do portalu nieruchomości.'
   };
 }
