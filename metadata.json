@@ -1,0 +1,8 @@
+{
+  "name": "PropFinder",
+  "description": "Finds rent or sale properties in the Polish market based on your prompt, powered by AI Google search.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
