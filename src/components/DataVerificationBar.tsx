@@ -85,7 +85,7 @@ export function DataVerificationBar({ properties, summary, query }: DataVerifica
           </span>
           <span className="inline-flex items-center gap-1 bg-neutral-50 px-2 py-0.5 rounded-md border border-neutral-200">
             <Check className="w-3 h-3 text-emerald-600" />
-            <span>Bezpośrednie linki do ofert</span>
+            <span>Ochrona linków (1:1, bez stron kategorii)</span>
           </span>
           <span className="inline-flex items-center gap-1 bg-neutral-50 px-2 py-0.5 rounded-md border border-neutral-200">
             <Check className="w-3 h-3 text-emerald-600" />
@@ -165,7 +165,7 @@ export function DataVerificationBar({ properties, summary, query }: DataVerifica
                     { title: 'Powierzchnia i liczba pokoi', desc: 'Rzeczywisty metraż w m² oraz liczba pokoi / piętro' },
                     { title: 'Zasada 1 oferty w boksie opisu', desc: 'Brak łączenia kilku mieszkań w jednym opisie, brak zduplikowanych ofert portalu' },
                     { title: 'Priorytet ofert z numerem telefonu', desc: 'Promowanie i pozycjonowanie na początku listy ogłoszeń z jawnym numerem kontaktowym do właściciela lub agenta' },
-                    { title: 'Bezpośredni link do ogłoszenia', desc: 'Odsyłacz bezpośrednio do danej oferty lub celowane zapytanie, brak linków do kategorii' },
+                    { title: 'Ochrona przed stronami zbiorczymi portali', desc: 'Rygorystyczna blokada stron kategorii i list wielu mieszkań (tzw. cheat pages). Każdy link prowadzi wyłącznie do konkretnego ogłoszenia (1:1)' },
                     { title: 'Weryfikacja portalu źródłowego', desc: 'Rozpoznane zaufane polskie źródło (Otodom, OLX, Gratka, Morizon, itp.)' }
                   ].map((rule, rIdx) => (
                     <div key={rIdx} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-neutral-50 border border-neutral-200/60">

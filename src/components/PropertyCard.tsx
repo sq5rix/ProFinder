@@ -1,4 +1,4 @@
-import { useState, Key } from 'react';
+import { useState, useEffect, Key } from 'react';
 import { 
   MapPin, 
   ExternalLink, 
@@ -12,9 +12,12 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
-  ShieldCheck
+  ShieldCheck,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
-import { Property } from '../types';
+import { Property, LiveVerificationInfo } from '../types';
+import { resolveDirectPropertyUrl } from '../utils/urlValidator';
 
 interface PropertyCardProps {
   key?: Key;
@@ -43,8 +46,35 @@ function getSingleOfferDescription(desc?: string): string {
 export function PropertyCard({ property, index, isSelected, onShowOnMap }: PropertyCardProps) {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [liveInfo, setLiveInfo] = useState<LiveVerificationInfo | undefined>(property.liveVerification);
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  useEffect(() => {
+    setLiveInfo(property.liveVerification);
+  }, [property.liveVerification]);
 
   const singleOfferDescription = getSingleOfferDescription(property.description);
+
+  // Enforce that the link points exclusively to this individual property ad, never a category/aggregator cheat page
+  const urlCheck = resolveDirectPropertyUrl(property);
+  const offerUrl = urlCheck.url;
+
+  const checkLiveAvailability = async () => {
+    setIsVerifying(true);
+    try {
+      const res = await fetch('/api/verify-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: offerUrl })
+      });
+      const data = await res.json();
+      setLiveInfo(data);
+    } catch (e) {
+      console.error('Błąd podczas weryfikacji na żywo:', e);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   const handleCopy = () => {
     const text = `Tytuł: ${property.title}
@@ -69,36 +99,6 @@ ${singleOfferDescription}`;
   };
 
   const isRent = property.dealType?.toLowerCase().includes('wynaj') || property.dealType?.toLowerCase().includes('rent');
-
-  // Enforce that the link opens exclusively this displayed property, never a general category list of all properties
-  const getOfferUrl = () => {
-    if (!property.url || !property.url.startsWith('http')) {
-      return `https://www.google.com/search?q=${encodeURIComponent(`"${property.title}" ${property.location} ${property.source}`)}`;
-    }
-    const lower = property.url.toLowerCase();
-    const isGeneric = 
-      lower.includes('/oferty/') || 
-      (lower.includes('olx.pl/nieruchomosci') && !lower.includes('/oferta/')) || 
-      lower.includes('/do-wynajecia/') || 
-      lower.includes('/sprzedaz/mieszkania') || 
-      lower.includes('/szukaj.html');
-
-    if (isGeneric) {
-      const portalDomain = property.source?.toLowerCase().includes('olx')
-        ? 'olx.pl'
-        : property.source?.toLowerCase().includes('morizon')
-        ? 'morizon.pl'
-        : property.source?.toLowerCase().includes('gratka')
-        ? 'gratka.pl'
-        : property.source?.toLowerCase().includes('nieruchomosci-online')
-        ? 'nieruchomosci-online.pl'
-        : 'otodom.pl';
-      return `https://www.google.com/search?q=${encodeURIComponent(`site:${portalDomain} "${property.title}" ${property.location}`)}`;
-    }
-    return property.url;
-  };
-
-  const offerUrl = getOfferUrl();
 
   return (
     <div 
@@ -136,6 +136,41 @@ ${singleOfferDescription}`;
               </span>
             )}
 
+            {/* Real-time HTTP Live Availability Badge */}
+            {liveInfo ? (
+              liveInfo.isLive ? (
+                <span 
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-900 border border-emerald-300 shadow-2xs"
+                  title={liveInfo.message || 'Sprawdzono na żywo: ogłoszenie w 100% aktywne i dostępne (kod HTTP 200)'}
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+                  </span>
+                  <span>Aktywne na żywo (200 OK)</span>
+                </span>
+              ) : (
+                <span 
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-300"
+                  title={liveInfo.message || 'Ogłoszenie wygasło, zostało usunięte lub przekierowuje do strony zbiorczej'}
+                >
+                  <AlertTriangle className="w-3 h-3 text-rose-600" />
+                  <span>{liveInfo.isTrap ? 'Pułapka 404 / Zbiorcza' : liveInfo.isArchived ? 'Nieaktualne / Archiwalne' : 'Wygasłe (404)'}</span>
+                </span>
+              )
+            ) : (
+              <button
+                type="button"
+                onClick={checkLiveAvailability}
+                disabled={isVerifying}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border border-neutral-300 transition-colors cursor-pointer"
+                title="Sprawdź teraz w czasie rzeczywistym żądaniem HTTP, czy ogłoszenie jest aktywne i do wzięcia"
+              >
+                <RefreshCw className={`w-3 h-3 text-neutral-600 ${isVerifying ? 'animate-spin' : ''}`} />
+                <span>{isVerifying ? 'Sprawdzam...' : 'Sprawdź dostępność'}</span>
+              </button>
+            )}
+
             {property.validation?.isFullyValid !== false && (
               <span 
                 className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200"
@@ -153,6 +188,24 @@ ${singleOfferDescription}`;
               >
                 <Phone className="w-3 h-3 text-emerald-700" />
                 <span>Telefon</span>
+              </span>
+            )}
+
+            {urlCheck.wasSanitized ? (
+              <span 
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-50 text-sky-800 border border-sky-200"
+                title="Ochrona przed stronami zbiorczymi portalu: link skierowano bezpośrednio do tej konkretnej oferty."
+              >
+                <ExternalLink className="w-3 h-3 text-sky-600" />
+                <span>Link bezpośredni</span>
+              </span>
+            ) : (
+              <span 
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-800 border border-blue-200"
+                title="Zweryfikowany link prowadzi wyłącznie do tej indywidualnej oferty."
+              >
+                <ExternalLink className="w-3 h-3 text-blue-600" />
+                <span>Oferta 1:1</span>
               </span>
             )}
           </div>
@@ -303,17 +356,31 @@ ${singleOfferDescription}`;
           </div>
         )}
 
-        <a
-          id={`property-link-${index}`}
-          href={offerUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white font-medium transition-colors shadow-xs group/link"
-          title="Przejdź wyłącznie do tej konkretnej oferty nieruchomości"
-        >
-          <span>Zobacz tę ofertę</span>
-          <ExternalLink className="w-3.5 h-3.5 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" />
-        </a>
+        <div className="flex items-center gap-2">
+          {liveInfo && !liveInfo.isLive && (
+            <span 
+              className="text-[11px] font-semibold text-rose-700 bg-rose-50 px-2 py-1 rounded-md border border-rose-200"
+              title={liveInfo.message}
+            >
+              Wygasłe / 404
+            </span>
+          )}
+          <a
+            id={`property-link-${index}`}
+            href={offerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors shadow-xs group/link ${
+              liveInfo && !liveInfo.isLive
+                ? 'bg-neutral-600 hover:bg-neutral-700 text-white'
+                : 'bg-neutral-900 hover:bg-neutral-800 text-white'
+            }`}
+            title={liveInfo && !liveInfo.isLive ? 'Oferta wygasła lub została zarchiwizowana' : 'Przejdź wyłącznie do tej konkretnej oferty nieruchomości'}
+          >
+            <span>{liveInfo && !liveInfo.isLive ? 'Szukaj w portalu' : 'Zobacz tę ofertę'}</span>
+            <ExternalLink className="w-3.5 h-3.5 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" />
+          </a>
+        </div>
       </div>
     </div>
   );

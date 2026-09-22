@@ -15,6 +15,17 @@ export interface PropertyValidation {
   warnings: string[];
 }
 
+export interface LiveVerificationInfo {
+  isLive: boolean;
+  status: number;
+  finalUrl?: string;
+  isArchived?: boolean;
+  isTrap?: boolean;
+  statusLabel: 'active' | 'archived' | 'dead_404' | 'trap_redirect' | 'blocked' | 'error';
+  message: string;
+  checkedAt?: string;
+}
+
 export interface Property {
   id?: string;
   title: string;
@@ -38,6 +49,7 @@ export interface Property {
   latitude?: number;
   longitude?: number;
   validation?: PropertyValidation;
+  liveVerification?: LiveVerificationInfo;
 }
 
 export interface GroundingSource {

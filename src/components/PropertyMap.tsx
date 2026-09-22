@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Property } from '../types';
 import { resolvePropertyCoordinates } from '../utils/geocoding';
+import { resolveDirectPropertyUrl } from '../utils/urlValidator';
 import { 
   Maximize2, 
   MapPin, 
@@ -294,6 +295,15 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
                 <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-200">
                   {activeProperty.source}
                 </span>
+                {activeProperty.liveVerification && (
+                  <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+                    activeProperty.liveVerification.isLive 
+                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300' 
+                      : 'bg-rose-100 text-rose-800 border-rose-300'
+                  }`}>
+                    {activeProperty.liveVerification.isLive ? '✓ Aktywna na żywo' : 'Wygasła (404)'}
+                  </span>
+                )}
               </div>
 
               <button
@@ -349,15 +359,23 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
                 </div>
               )}
 
-              <a
-                href={activeProperty.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold transition-colors shrink-0"
-              >
-                <span>Otwórz ofertę</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+              {(() => {
+                const mapUrlCheck = resolveDirectPropertyUrl(activeProperty);
+                return (
+                  <a
+                    href={mapUrlCheck.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold transition-colors shrink-0"
+                    title={mapUrlCheck.wasSanitized 
+                      ? 'Ochrona przed stronami zbiorczymi portalu: link prowadzi bezpośrednio do tej oferty' 
+                      : 'Otwórz bezpośrednio tę konkretną ofertę'}
+                  >
+                    <span>Otwórz ofertę</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                );
+              })()}
             </div>
           </div>
         )}

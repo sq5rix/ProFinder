@@ -4,6 +4,8 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { getFallbackProperties } from './server/fallbackProperties.ts';
 import { resolvePropertyCoordinates } from './src/utils/geocoding.ts';
+import { resolveDirectPropertyUrl, isSpecificPropertyUrl } from './src/utils/urlValidator.ts';
+import { verifyPropertiesLive, verifyUrlLive } from './server/liveUrlVerifier.ts';
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -47,40 +49,7 @@ function cleanErrorMessage(err: any): string {
 }
 
 function isGenericListingUrl(urlStr: string): boolean {
-  if (!urlStr || typeof urlStr !== 'string' || !urlStr.startsWith('http')) return true;
-  try {
-    const u = new URL(urlStr);
-    const path = u.pathname.toLowerCase();
-
-    // Otodom: /pl/oferta/ or /oferta/ is a specific single listing.
-    // /pl/oferty/ or /oferty/ is a list of ALL properties.
-    if (u.hostname.includes('otodom.pl')) {
-      if (path.includes('/oferty/') || !path.includes('/oferta/')) return true;
-    }
-    // OLX: /d/oferta/ or /oferta/ is a specific single listing.
-    // /nieruchomosci/ is a list of ALL properties.
-    if (u.hostname.includes('olx.pl')) {
-      if (!path.includes('/oferta/')) return true;
-    }
-    // Morizon: /oferta/ is a single listing.
-    // /do-wynajecia/ or /sprzedaz/ is a list of ALL properties.
-    if (u.hostname.includes('morizon.pl')) {
-      if (!path.includes('/oferta/')) return true;
-    }
-    // Gratka: /ob/ or numerical ID is a single listing.
-    if (u.hostname.includes('gratka.pl')) {
-      if (!path.includes('/ob/') && !/\d{5,}/.test(path)) return true;
-    }
-    // Nieruchomosci-online: /id.html
-    if (u.hostname.includes('nieruchomosci-online.pl')) {
-      if (!/\d+\.html/.test(path)) return true;
-    }
-    const segments = path.split('/').filter(Boolean);
-    if (segments.length <= 1) return true;
-    return false;
-  } catch {
-    return true;
-  }
+  return !isSpecificPropertyUrl(urlStr);
 }
 
 // Ensures strictly ONE offer per description box by stripping any aggregated lists or multiple offer bundles
@@ -193,6 +162,18 @@ function finalCheckAndNormalizeProperty(prop: any, pIdx: number): any {
   const latitude = coords ? coords.lat : undefined;
   const longitude = coords ? coords.lng : undefined;
 
+  // 9. Single-Property URL Verification and Anti-Cheat Protection
+  // Big portals (Otodom, OLX, Morizon, Gratka) frequently cheat by returning category or multi-listing pages.
+  // We strictly resolve and sanitize the URL so it points exclusively to this individual property.
+  const urlCheck = resolveDirectPropertyUrl({
+    url: prop.url,
+    title,
+    location,
+    source: prop.source
+  });
+  const url = urlCheck.url;
+  const isDirectOffer = true;
+
   return {
     ...prop,
     title,
@@ -207,7 +188,9 @@ function finalCheckAndNormalizeProperty(prop: any, pIdx: number): any {
     hasPhoneNumber,
     phoneNumber: phone || undefined,
     latitude,
-    longitude
+    longitude,
+    url,
+    isDirectOffer
   };
 }
 
@@ -239,7 +222,10 @@ async function searchPropertiesWithModel(modelName: string, prompt: string) {
               description: 'Single individual property description ONLY. STRICT REQUIREMENT: Describe ONLY THIS ONE specific single property (interior, finishing, rooms, floor, amenities). NEVER combine or list multiple properties, other flats, or aggregated options in this description box.' 
             },
             source: { type: Type.STRING, description: 'Portal name like Otodom, OLX, Morizon' },
-            url: { type: Type.STRING, description: 'Direct URL strictly to this specific individual property listing page (e.g. otodom.pl/pl/oferta/... or olx.pl/d/oferta/...). DO NOT return category or listing pages showing all properties.' },
+            url: { 
+              type: Type.STRING, 
+              description: 'DIRECT URL STRICTLY AND EXCLUSIVELY TO THIS SINGLE SPECIFIC PROPERTY AD PAGE (e.g. otodom.pl/pl/oferta/[slug] or olx.pl/d/oferta/[id].html or morizon.pl/oferta/[id].html). CATEGORICAL BAN: Never return category pages, search results, or multi-property aggregator URLs.' 
+            },
             contact: { 
               type: Type.STRING, 
               description: 'DIRECT PHONE NUMBER (e.g. "+48 501 234 567", "600 123 456", "791-234-567") to the owner or agent. PRIORITIZE extracting actual phone numbers!' 
@@ -315,6 +301,15 @@ KATEGORYCZNA ZASADA: DOKŁADNIE JEDNA OFERTA NA JEDEN BOKS OPISU (ONE OFFER PER 
 - BEZWZGLĘDNY ZAKAZ: Pod żadnym pozorem nie łącz wielu ofert w jednym opisie! Nie pisz "Oferta 1: ..., Oferta 2: ...", nie wstawiaj list mieszkań ("1)... 2)..."), ani podsumowań typu "W ofercie mamy także 3 inne mieszkania...".
 - W każdym boksie opisu (description) znajduje się wyłącznie jedna, konkretna oferta.
 
+★★★ BEZWZGLĘDNA OCHRONA PRZED OSZUSTWAMI PORTALI NIERUCHOMOŚCI I BŁĘDEM 404 (OTODOM / CALA-POLSKA / FROM404) ★★★
+KRYTYCZNA UWAGA: Portale takie jak Otodom.pl natychmiast przekierowują użytkownika na stronę główną/zbiorczą ("cala-polska#from404"), jeśli URL nie zawiera prawdziwego identyfikatora oferty (-ID...):
+- OTODOM: format "https://www.otodom.pl/pl/oferta/[slug]-ID[unikalny-kod]" (np. "https://www.otodom.pl/pl/oferta/kawalerka-bielany-ID4oMkp").
+  BEZWZGLĘDNY ZAKAZ: NIGDY nie twórz sztucznych URL bez końcówki -ID! NIGDY nie zwracaj /pl/wyniki/, /sprzedaz/mieszkanie/cala-polska ani #from404!
+- OLX: format "https://www.olx.pl/d/oferta/[slug]-ID[kod].html" (NIGDY ogólne /nieruchomosci/!)
+- MORIZON: format "https://www.morizon.pl/oferta/[slug]-ID[kod].html"
+- GRATKA: format "https://gratka.pl/nieruchomosci/[slug]/ob/[id]"
+- Jeśli nie znasz dokładnego URL z identyfikatorem ID danej oferty, podaj dokładny URL bezpośrednio ze zwróconych źródeł wyszukiwania Google (groundingChunks).
+
 Dla każdej oferty podaj szczegóły w języku polskim:
 - title: tytuł ogłoszenia
 - location: miasto i dzielnica/osiedle w Polsce (np. "Warszawa, Mokotów" lub "Kraków, Krowodrza")
@@ -328,7 +323,7 @@ Dla każdej oferty podaj szczegóły w języku polskim:
 - floor: piętro (np. "3/5 piętro", "parter", "dom", "N/A")
 - description: 2-3 zdania opisu wyłącznie tej jednej nieruchomości (standard, meble, stan, ekspozycja, okolica)
 - source: nazwa portalu (np. "Otodom", "OLX", "Morizon", "Nieruchomości-online", "Gratka")
-- url: BEZPOŚREDNI link URL wyłącznie do tej JEDNEJ konkretnej prezentowanej oferty nieruchomości (np. "https://www.otodom.pl/pl/oferta/[slug-id]" na Otodom lub "https://www.olx.pl/d/oferta/[id]" na OLX). KATEGORYCZNY ZAKAZ: Nigdy nie podawaj linków do stron kategorii ani list wszystkich ofert.
+- url: BEZPOŚREDNI link URL wyłącznie do tej JEDNEJ konkretnej prezentowanej oferty nieruchomości (z prawdziwym ID oferty). KATEGORYCZNY ZAKAZ: Nigdy nie podawaj linków do stron kategorii, list wszystkich ofert, ani linków 404.
 - contact: bezpośredni numer telefonu (np. "+48 501 234 567", "Tel: 602 123 456"), agent z telefonem lub "W ogłoszeniu"
 - hasPhoneNumber: boolean (true jeśli ogłoszenie zawiera bezpośredni numer telefonu, false w przeciwnym razie)
 - features: lista udogodnień (np. ["Balkon", "Winda", "Garaż", "Klimatyzacja"])
@@ -422,9 +417,9 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
     // Ensure every property's url is strictly for that displayed property, not for all
     properties = properties.map((prop: any, pIdx: number) => {
       let link = typeof prop.url === 'string' ? prop.url.trim() : '';
-      let isDirect = !isGenericListingUrl(link);
+      let isDirect = isSpecificPropertyUrl(link);
 
-      // If the model returned a general list/category URL, match a single-offer URL from grounding
+      // If the model returned an invalid / generic / 404 trap URL, match a single-offer URL from grounding
       if (!isDirect && specificOfferUris.length > 0) {
         const titleWords = (prop.title || '')
           .toLowerCase()
@@ -445,23 +440,18 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
         }
       }
 
-      // If still not a direct link to this specific offer, build a targeted search strictly for THIS displayed property
+      // If still not a direct link to this specific offer with valid ID, sanitize via resolveDirectPropertyUrl
       if (!isDirect) {
-        const portal = (prop.source || '').toLowerCase();
-        const portalDomain = portal.includes('olx') 
-          ? 'olx.pl' 
-          : portal.includes('morizon') 
-          ? 'morizon.pl' 
-          : portal.includes('gratka') 
-          ? 'gratka.pl' 
-          : portal.includes('nieruchomosci-online') 
-          ? 'nieruchomosci-online.pl' 
-          : 'otodom.pl';
-
-        link = `https://www.google.com/search?q=${encodeURIComponent(`site:${portalDomain} "${prop.title}" ${prop.location || ''}`)}`;
+        const sanitized = resolveDirectPropertyUrl({
+          url: link,
+          title: prop.title,
+          location: prop.location,
+          source: prop.source
+        });
+        link = sanitized.url;
       }
 
-      const normalizedProp = finalCheckAndNormalizeProperty(prop, pIdx);
+      const normalizedProp = finalCheckAndNormalizeProperty({ ...prop, url: link }, pIdx);
       const singleDesc = cleanSingleOfferDescription(normalizedProp.description);
 
       return {
@@ -473,8 +463,21 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
       };
     });
 
-    // Prioritize ads with direct phone numbers at the very top of results
+    // Live HTTP availability verification:
+    // Pings URLs in real-time, follows redirects, rejects 404s and Otodom cala-polska#from404 traps, and detects archived ad notices
+    try {
+      properties = await verifyPropertiesLive(properties, specificOfferUris);
+    } catch (verErr) {
+      console.log('[Info] Błąd podczas weryfikacji na żywo:', verErr);
+    }
+
+    // Sort properties: active & live-verified with phone numbers at the very top,
+    // dead/archived listings moved to the bottom with clear warnings
     properties.sort((a: any, b: any) => {
+      const aLive = a.liveVerification?.isLive ? 1 : 0;
+      const bLive = b.liveVerification?.isLive ? 1 : 0;
+      if (bLive !== aLive) return bLive - aLive;
+
       const aHas = a.hasPhoneNumber || (a.phoneNumber && a.phoneNumber.length > 0) ? 1 : 0;
       const bHas = b.hasPhoneNumber || (b.phoneNumber && b.phoneNumber.length > 0) ? 1 : 0;
       return bHas - aHas;
@@ -485,6 +488,17 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
       groundingQueries,
       groundingSources
     });
+  });
+
+  // On-demand live verification for any property URL
+  app.post('/api/verify-url', async (req, res) => {
+    try {
+      const { url } = req.body || {};
+      const result = await verifyUrlLive(url);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Błąd podczas weryfikacji na żywo' });
+    }
   });
 
   // Backward compatibility alias for /api/search-companies

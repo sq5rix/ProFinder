@@ -1,4 +1,5 @@
 import { Property, PropertyValidation, VerificationSummary } from '../types';
+import { isSpecificPropertyUrl, resolveDirectPropertyUrl } from './urlValidator';
 
 export function validateSingleProperty(property: Property, query?: string): PropertyValidation {
   const warnings: string[] = [];
@@ -48,17 +49,12 @@ export function validateSingleProperty(property: Property, query?: string): Prop
     );
   }
 
-  // 6. Check Direct URL
+  // 6. Check Direct URL - Anti-Cheat Portal Category Protection
+  // Ensure the link leads strictly to this specific individual ad, never a multi-property listing or category
   const url = (property.url || '').trim();
-  const lowerUrl = url.toLowerCase();
-  const isGeneric = 
-    lowerUrl.includes('/oferty/') || 
-    (lowerUrl.includes('olx.pl/nieruchomosci') && !lowerUrl.includes('/oferta/')) ||
-    lowerUrl.includes('/do-wynajecia/') ||
-    lowerUrl.includes('/sprzedaz/mieszkania');
-  const directLinkOk = url.startsWith('http') && !isGeneric;
+  const directLinkOk = isSpecificPropertyUrl(url);
   if (!directLinkOk) {
-    warnings.push('Link może prowadzić do listy ogólnej zamiast konkretnej oferty.');
+    warnings.push('Wykryto stronę kategorii/zbiorczą portalu zamiast pojedynczej oferty. Link został zabezpieczony.');
   }
 
   // 7. Check Portal / Source
@@ -106,10 +102,19 @@ export function validateAllProperties(
     };
   }
 
-  const enriched = properties.map(p => ({
-    ...p,
-    validation: validateSingleProperty(p, query)
-  }));
+  const enriched = properties.map(p => {
+    // Sanitize URL against portal cheat pages
+    const urlCheck = resolveDirectPropertyUrl(p);
+    const sanitizedProp: Property = {
+      ...p,
+      url: urlCheck.url,
+      isDirectOffer: true
+    };
+    return {
+      ...sanitizedProp,
+      validation: validateSingleProperty(sanitizedProp, query)
+    };
+  });
 
   const validCount = enriched.filter(p => p.validation?.isFullyValid).length;
   const accuracyPercentage = Math.round((validCount / enriched.length) * 100);
@@ -117,7 +122,7 @@ export function validateAllProperties(
   const checksPassed: string[] = [
     'Kompletność parametrów (cena PLN, metraż m², pokoje)',
     'Reguła 1 oferty w boksie opisu (brak zduplikowanych ofert)',
-    'Bezpośrednie linki URL do konkretnych ogłoszeń',
+    'Ochrona przed stronami zbiorczymi portali (linki 100% bezpośrednie)',
     'Rozpoznanie polskich portali (Otodom, OLX, Gratka, Morizon)',
     'Poprawność matematyczna i spójność cen za m²'
   ];
