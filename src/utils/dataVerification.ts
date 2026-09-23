@@ -88,21 +88,34 @@ export function validateSingleProperty(property: Property, query?: string): Prop
 
 export function validateAllProperties(
   properties: Property[],
-  query?: string
+  query?: string,
+  prunedDeadOffersCount?: number
 ): { properties: Property[]; summary: VerificationSummary } {
-  if (!properties || properties.length === 0) {
+  // Discard any property that failed live verification (404, archived, trap)
+  const activeOnly = (properties || []).filter(p => {
+    if (!p.liveVerification) return true;
+    if (p.liveVerification.isLive === false) return false;
+    if (p.liveVerification.statusLabel === 'dead_404') return false;
+    if (p.liveVerification.statusLabel === 'trap_redirect') return false;
+    if (p.liveVerification.statusLabel === 'archived') return false;
+    if (p.liveVerification.status === 404 || p.liveVerification.status === 410) return false;
+    return true;
+  });
+
+  if (activeOnly.length === 0) {
     return {
       properties: [],
       summary: {
         totalChecked: 0,
         validCount: 0,
         accuracyPercentage: 100,
-        checksPassed: []
+        checksPassed: [],
+        prunedDeadOffersCount: prunedDeadOffersCount || 0
       }
     };
   }
 
-  const enriched = properties.map(p => {
+  const enriched = activeOnly.map(p => {
     // Sanitize URL against portal cheat pages
     const urlCheck = resolveDirectPropertyUrl(p);
     const sanitizedProp: Property = {
@@ -120,6 +133,7 @@ export function validateAllProperties(
   const accuracyPercentage = Math.round((validCount / enriched.length) * 100);
 
   const checksPassed: string[] = [
+    'Filtr 100% aktywnych ofert (wyeliminowano wygasłe / 404)',
     'Kompletność parametrów (cena PLN, metraż m², pokoje)',
     'Reguła 1 oferty w boksie opisu (brak zduplikowanych ofert)',
     'Ochrona przed stronami zbiorczymi portali (linki 100% bezpośrednie)',
@@ -133,7 +147,8 @@ export function validateAllProperties(
       totalChecked: enriched.length,
       validCount,
       accuracyPercentage,
-      checksPassed
+      checksPassed,
+      prunedDeadOffersCount: prunedDeadOffersCount || 0
     }
   };
 }

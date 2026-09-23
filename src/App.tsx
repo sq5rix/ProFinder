@@ -127,8 +127,20 @@ export default function App() {
       }
 
       const data: SearchResponse = await response.json();
-      const rawProperties: Property[] = data.properties || [];
-      const { properties: validatedProperties, summary } = validateAllProperties(rawProperties, targetQuery);
+      const rawProperties: Property[] = (data.properties || []).filter(p => {
+        if (!p.liveVerification) return true;
+        if (p.liveVerification.isLive === false) return false;
+        if (p.liveVerification.statusLabel === 'dead_404') return false;
+        if (p.liveVerification.statusLabel === 'trap_redirect') return false;
+        if (p.liveVerification.statusLabel === 'archived') return false;
+        if (p.liveVerification.status === 404 || p.liveVerification.status === 410) return false;
+        return true;
+      });
+      const { properties: validatedProperties, summary } = validateAllProperties(
+        rawProperties, 
+        targetQuery, 
+        data.prunedDeadOffersCount
+      );
       setProperties(validatedProperties);
       setVerificationSummary(summary);
       setGroundingQueries(data.groundingQueries || []);

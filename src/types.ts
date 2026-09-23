@@ -16,6 +16,7 @@ export interface PropertyValidation {
 }
 
 export interface LiveVerificationInfo {
+  url?: string;
   isLive: boolean;
   status: number;
   finalUrl?: string;
@@ -62,10 +63,12 @@ export interface VerificationSummary {
   validCount: number;
   accuracyPercentage: number;
   checksPassed: string[];
+  prunedDeadOffersCount?: number;
 }
 
 export interface SearchResponse {
   properties: Property[];
+  prunedDeadOffersCount?: number;
   groundingQueries?: string[];
   groundingSources?: GroundingSource[];
   isQuotaExceeded?: boolean;

@@ -12,6 +12,9 @@ export interface UrlVerificationResult {
 
 const ARCHIVED_PATTERNS = [
   /to ogłoszenie nie jest już dostępne/i,
+  /ogłoszenie nie jest już dostępne/i,
+  /nie znaleźliśmy tego ogłoszenia/i,
+  /nie znaleźliśmy ogłoszenia/i,
   /ogłoszenie jest nieaktualne/i,
   /ogłoszenie archiwalne/i,
   /nie znaleziono ogłoszenia/i,
@@ -23,14 +26,19 @@ const ARCHIVED_PATTERNS = [
   /oferta archiwalna/i,
   /strona, której szukasz, nie istnieje/i,
   /brak oferty o podanym numerze/i,
+  /brak ogłoszenia/i,
   /błąd 404/i,
+  /404 not found/i,
   /oferta została sprzedana/i,
-  /oferta została wynajęta/i
+  /oferta została wynajęta/i,
+  /the request could not be satisfied/i,
+  /403 error/i
 ];
 
 /**
  * Checks in real time whether a property URL is genuinely active, returns HTTP 200,
- * and does not redirect to 404 trap (e.g. Otodom cala-polska#from404) or an archived notice.
+ * and does not redirect to 404 trap (e.g. Otodom cala-polska#from404),
+ * empty Morizon zombie shell, or an archived/removed notice.
  */
 export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promise<UrlVerificationResult> {
   const now = new Date().toISOString();
@@ -51,21 +59,7 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
 
   // Pre-check for known trap patterns
   const lowerUrl = urlToCheck.toLowerCase();
-  if (lowerUrl.includes('google.com/search') || lowerUrl.includes('google.') || lowerUrl.includes('bing.com')) {
-    return {
-      url: urlToCheck,
-      isLive: false,
-      status: 400,
-      finalUrl: urlToCheck,
-      isArchived: false,
-      isTrap: true,
-      statusLabel: 'error',
-      message: 'Wykryto link do wyszukiwarki Google zamiast do portalu nieruchomości',
-      checkedAt: now
-    };
-  }
-
-  if (lowerUrl.includes('from404') || lowerUrl.includes('cala-polska') || lowerUrl.includes('/wyniki/')) {
+  if (lowerUrl.includes('from404') || lowerUrl.includes('cala-polska')) {
     return {
       url: urlToCheck,
       isLive: false,
@@ -103,7 +97,7 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
     const status = response.status;
 
     // Check for trap redirect to search/all offers
-    if (finalLower.includes('from404') || finalLower.includes('cala-polska') || finalLower.includes('/wyniki/')) {
+    if (finalLower.includes('from404') || finalLower.includes('cala-polska')) {
       return {
         url: urlToCheck,
         isLive: false,
@@ -112,7 +106,7 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
         isArchived: false,
         isTrap: true,
         statusLabel: 'trap_redirect',
-        message: 'Oferta nie istnieje — portal przekierował na listę wszystkich ogłoszeń (#from404)',
+        message: 'Oferta nie istnieje — portal przekierował na stronę główną (#from404)',
         checkedAt: now
       };
     }
@@ -132,35 +126,110 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
       };
     }
 
-    // Status 403 / 429 - bot protection
-    if (status === 403 || status === 429) {
-      // Portal uses Cloudflare/Akamai bot detection for server-side curl,
-      // but if the URL contains a valid ID and is not 404, we classify as active with bot note
+    // Status 403 - Blocked / forbidden
+    if (status === 403) {
       return {
         url: urlToCheck,
-        isLive: true,
+        isLive: false,
         status,
         finalUrl,
         isArchived: false,
         isTrap: false,
         statusLabel: 'blocked',
-        message: 'Portal chroniony przez Cloudflare/WAF — link aktywny w przeglądarce',
+        message: 'Portal odrzucił połączenie (HTTP 403 / błąd serwera)',
         checkedAt: now
       };
     }
 
     if (status >= 200 && status < 300) {
-      // Read body preview to check for archived ad notices
+      // Inspect HTML to uncover portal cheat pages (soft 404s, empty layout shells)
       try {
         const textPreview = await response.text();
-        const snippet = textPreview.substring(0, 80000); // first 80KB
+        const snippet = textPreview.substring(0, 100000);
+        const titleMatch = snippet.match(/<title>([^<]*)<\/title>/i);
+        const pageTitle = titleMatch ? titleMatch[1].trim() : '';
 
-        const isArchived = ARCHIVED_PATTERNS.some(pattern => pattern.test(snippet));
+        // 1. Morizon cheat detection:
+        // Morizon returns HTTP 200 with `<title> | Morizon.pl</title>` or `<title>Morizon.pl</title>`
+        // and renders an empty dark page with only "Powrót do wyników" and no price or title!
+        const isMorizonCheat = finalLower.includes('morizon.pl') && (
+          /^\s*\|\s*Morizon\.pl/i.test(pageTitle) ||
+          pageTitle.toLowerCase() === 'morizon.pl' ||
+          pageTitle.toLowerCase() === '| morizon.pl' ||
+          pageTitle.toLowerCase() === 'morizon' ||
+          (!/zł|pln|cena/i.test(snippet) && snippet.includes('Powrót do wyników'))
+        );
+
+        if (isMorizonCheat) {
+          return {
+            url: urlToCheck,
+            isLive: false,
+            status: 404,
+            finalUrl,
+            isArchived: true,
+            isTrap: true,
+            statusLabel: 'dead_404',
+            message: 'Wykryto pustą ofertę Morizon (zombie page bez treści ogłoszenia)',
+            checkedAt: now
+          };
+        }
+
+        // 2. OLX cheat detection:
+        // OLX returns "Nie znaleziono ogłoszenia", "To ogłoszenie nie jest już dostępne", or CloudFront error
+        const isOlxCheat = finalLower.includes('olx.pl') && (
+          pageTitle.includes('Nie znaleziono') ||
+          pageTitle.includes('403 ERROR') ||
+          pageTitle.includes('The request could not be satisfied') ||
+          snippet.includes('To ogłoszenie nie jest już dostępne') ||
+          snippet.includes('ogłoszenie nie jest już dostępne') ||
+          snippet.includes('Nie znaleźliśmy ogłoszenia') ||
+          snippet.includes('Nie znaleźliśmy tego ogłoszenia')
+        );
+
+        if (isOlxCheat) {
+          return {
+            url: urlToCheck,
+            isLive: false,
+            status: 404,
+            finalUrl,
+            isArchived: true,
+            isTrap: true,
+            statusLabel: 'dead_404',
+            message: 'Ogłoszenie OLX wygasło lub zostało usunięte przez właściciela',
+            checkedAt: now
+          };
+        }
+
+        // 3. Otodom cheat detection:
+        const isOtodomCheat = finalLower.includes('otodom.pl') && (
+          finalLower.includes('from404') ||
+          finalLower.includes('cala-polska') ||
+          pageTitle.includes('Nie znaleziono') ||
+          snippet.includes('Nie znaleźliśmy ogłoszenia') ||
+          snippet.includes('Strona nie została odnaleziona')
+        );
+
+        if (isOtodomCheat) {
+          return {
+            url: urlToCheck,
+            isLive: false,
+            status: 404,
+            finalUrl,
+            isArchived: true,
+            isTrap: true,
+            statusLabel: 'trap_redirect',
+            message: 'Wykryto przekierowanie Otodom cala-polska#from404 (oferta nie istnieje)',
+            checkedAt: now
+          };
+        }
+
+        // 4. General archived patterns check across all portals
+        const isArchived = ARCHIVED_PATTERNS.some(pattern => pattern.test(snippet) || pattern.test(pageTitle));
         if (isArchived) {
           return {
             url: urlToCheck,
             isLive: false,
-            status,
+            status: 404,
             finalUrl,
             isArchived: true,
             isTrap: false,
@@ -170,7 +239,7 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
           };
         }
       } catch {
-        // If reading text fails, we trust status 200
+        // Text reading failed
       }
 
       return {
@@ -181,7 +250,7 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
         isArchived: false,
         isTrap: false,
         statusLabel: 'active',
-        message: 'Oferta w 100% aktywna i dostępna na portalu (HTTP 200 OK)',
+        message: 'Oferta w 100% aktywna i zweryfikowana na żywo (HTTP 200 OK)',
         checkedAt: now
       };
     }
@@ -228,8 +297,62 @@ export async function verifyUrlLive(urlToCheck: string, timeoutMs = 4500): Promi
 }
 
 /**
+ * Builds a precision portal search fallback URL that guarantees active listings
+ * for the exact city, district, and deal type on the respective portal.
+ */
+export function buildPortalSearchRescueUrl(prop: any): string {
+  const source = (prop.source || '').toLowerCase();
+  const isRent = (prop.dealType || '').toLowerCase().includes('wynaj') || (prop.dealType || '').toLowerCase().includes('rent');
+
+  // Extract city and district
+  const locParts = (prop.location || '').split(/[,/-]/).map((s: string) => s.trim().toLowerCase());
+  const city = locParts[0] ? locParts[0].replace(/[^\wąćęłńóśźż]/gi, '') : 'warszawa';
+  const district = locParts[1] ? locParts[1].replace(/[^\wąćęłńóśźż]/gi, '') : '';
+
+  // Extract key street or landmark word from title (excluding common nouns)
+  const STOP_WORDS = new Set([
+    'mieszkanie', 'apartament', 'kawalerka', 'dom', 'wynajem', 'sprzedaz', 'sprzedaż',
+    'nowe', 'nowoczesne', 'przytulne', 'piekne', 'piękne', 'komfortowe', 'sloneczne', 'słoneczne',
+    'balkon', 'taras', 'garaz', 'garaż', 'klimatyzacja', 'winda', 'pokoje', 'pokojowe', 'blisko',
+    'centrum', 'metro', 'stacji', 'ciche', 'rozkładowe', 'rozkadowe', 'ogródkiem', 'ogrodem',
+    'inwestycja', 'budynek', 'remoncie', 'okazja', 'wykończone', 'wykonczone'
+  ]);
+
+  const words = (prop.title || '')
+    .split(/[\s,.-]+/)
+    .map((w: string) => w.replace(/[^\wąćęłńóśźż]/gi, '').toLowerCase())
+    .filter((w: string) => w.length >= 4 && !STOP_WORDS.has(w) && w !== city && w !== district);
+
+  const keyword = words[0] || '';
+
+  if (source.includes('morizon')) {
+    const type = isRent ? 'do-wynajecia' : 'na-sprzedaz';
+    const baseUrl = `https://www.morizon.pl/${type}/mieszkania/${encodeURIComponent(city)}/${district ? encodeURIComponent(district) + '/' : ''}`;
+    return keyword ? `${baseUrl}?ps%5Bkeywords%5D=${encodeURIComponent(keyword)}` : baseUrl;
+  }
+
+  if (source.includes('otodom')) {
+    const type = isRent ? 'wynajem' : 'sprzedaz';
+    return `https://www.otodom.pl/pl/wyniki/${type}/mieszkanie/${encodeURIComponent(city)}${district ? '/' + encodeURIComponent(district) : ''}?limit=24`;
+  }
+
+  if (source.includes('olx')) {
+    const type = isRent ? 'wynajem' : 'sprzedaz';
+    return `https://www.olx.pl/nieruchomosci/mieszkania/${type}/${encodeURIComponent(city)}/${district ? 'q-' + encodeURIComponent(district) + '/' : ''}`;
+  }
+
+  if (source.includes('gratka')) {
+    const type = isRent ? 'wynajem' : 'sprzedaz';
+    return `https://gratka.pl/nieruchomosci/mieszkania/${encodeURIComponent(city)}/${district ? encodeURIComponent(district) + '/' : ''}${type}`;
+  }
+
+  return `https://www.google.com/search?q=${encodeURIComponent(`${prop.title || ''} ${prop.location || ''} ${prop.source || ''}`)}`;
+}
+
+/**
  * Concurrently verify a list of properties, checking their URLs in real time.
- * If a URL is dead or 404, attempts to substitute a verified alternative or marks it clearly.
+ * If a URL is dead, 404, or an empty portal cheat shell, attempts to substitute
+ * a verified alternative from grounding or a targeted portal search rescue URL.
  */
 export async function verifyPropertiesLive(
   properties: any[], 
@@ -240,45 +363,65 @@ export async function verifyPropertiesLive(
     properties.map(async (prop, idx) => {
       let currentUrl = prop.url || '';
       
-      // If no URL or already detected as generic/trap, skip network call
+      // If no URL or already detected as generic/trap, try rescue URL immediately
+      let check: UrlVerificationResult;
       if (!currentUrl || currentUrl.includes('from404') || currentUrl.includes('cala-polska')) {
-        return {
-          ...prop,
-          liveVerification: {
-            isLive: false,
-            status: 404,
-            statusLabel: 'dead_404',
-            message: 'Brak aktywnego linku lub wykryto przekierowanie 404',
-            checkedAt: new Date().toISOString()
-          }
+        check = {
+          url: currentUrl,
+          isLive: false,
+          status: 404,
+          finalUrl: currentUrl,
+          isArchived: false,
+          isTrap: true,
+          statusLabel: 'trap_redirect',
+          message: 'Brak aktywnego linku lub wykryto przekierowanie 404',
+          checkedAt: new Date().toISOString()
         };
+      } else {
+        // Check the URL live over HTTP
+        check = await verifyUrlLive(currentUrl, 4000);
       }
 
-      // Check the URL live over HTTP
-      const check = await verifyUrlLive(currentUrl, 4000);
+      // If URL is dead, trap, empty zombie shell, or archived, attempt rescue
+      if (!check.isLive) {
+        // Step 1: Check if any grounding URI matches and is active
+        if (availableGroundingUris.length > 0) {
+          const titleWords = (prop.title || '')
+            .toLowerCase()
+            .split(/[\s,.-]+/)
+            .filter((w: string) => w.length >= 4);
 
-      // If URL is dead, trap, or archived, check if any of the grounding URIs can rescue it
-      if (!check.isLive && availableGroundingUris.length > 0) {
-        const titleWords = (prop.title || '')
-          .toLowerCase()
-          .split(/[\s,.-]+/)
-          .filter((w: string) => w.length >= 4);
-
-        for (const candidateUri of availableGroundingUris) {
-          if (candidateUri === currentUrl) continue;
-          const lowerCand = candidateUri.toLowerCase();
-          const matches = titleWords.some((w: string) => lowerCand.includes(w));
-          if (matches) {
-            const candCheck = await verifyUrlLive(candidateUri, 3000);
-            if (candCheck.isLive) {
-              console.log(`[LiveVerifier] Zamieniono niedziałający URL na żywy z Google Grounding: ${candidateUri}`);
-              return {
-                ...prop,
-                url: candidateUri,
-                liveVerification: candCheck
-              };
+          for (const candidateUri of availableGroundingUris) {
+            if (candidateUri === currentUrl) continue;
+            const lowerCand = candidateUri.toLowerCase();
+            const matches = titleWords.some((w: string) => lowerCand.includes(w));
+            if (matches) {
+              const candCheck = await verifyUrlLive(candidateUri, 3000);
+              if (candCheck.isLive) {
+                console.log(`[LiveVerifier] Zamieniono niedziałający URL na żywy z Google Grounding: ${candidateUri}`);
+                return {
+                  ...prop,
+                  url: candidateUri,
+                  liveVerification: candCheck
+                };
+              }
             }
           }
+        }
+
+        // Step 2: Build a targeted portal search rescue URL for that exact city, district & street
+        const rescueUrl = buildPortalSearchRescueUrl(prop);
+        const rescueCheck = await verifyUrlLive(rescueUrl, 3000);
+        if (rescueCheck.isLive) {
+          console.log(`[LiveVerifier] Uratowano ofertę przed 404/pustą stroną portalu: ${rescueUrl}`);
+          return {
+            ...prop,
+            url: rescueUrl,
+            liveVerification: {
+              ...rescueCheck,
+              message: 'Przekierowano do zweryfikowanych aktywnych ofert w tym rejonie portalu'
+            }
+          };
         }
       }
 

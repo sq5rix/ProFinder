@@ -17,7 +17,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { Property, LiveVerificationInfo } from '../types';
-import { resolveDirectPropertyUrl, isValidPolishPhoneNumber, formatPolishPhoneNumber } from '../utils/urlValidator';
+import { resolveDirectPropertyUrl } from '../utils/urlValidator';
 
 interface PropertyCardProps {
   key?: Key;
@@ -55,21 +55,9 @@ export function PropertyCard({ property, index, isSelected, onShowOnMap }: Prope
 
   const singleOfferDescription = getSingleOfferDescription(property.description);
 
-  // Phone validation: verify number is complete and contains NO 'xxx', '*', or masking
-  const isRealPhone = Boolean(
-    property.phoneNumber && isValidPolishPhoneNumber(property.phoneNumber)
-  );
-  const formattedPhone = isRealPhone ? formatPolishPhoneNumber(property.phoneNumber) : null;
-  const rawDialNumber = isRealPhone && property.phoneNumber ? property.phoneNumber.replace(/[^\d+]/g, '') : null;
-
-  // Enforce that the link points exclusively to this individual property ad on real portals (NEVER Google Search)
+  // Enforce that the link points exclusively to this individual property ad, never a category/aggregator cheat page
   const urlCheck = resolveDirectPropertyUrl(property);
-  let offerUrl = urlCheck.url;
-  if (offerUrl.toLowerCase().includes('google.com/search') || offerUrl.toLowerCase().includes('google.')) {
-    offerUrl = property.source?.toLowerCase().includes('olx') 
-      ? 'https://www.olx.pl/nieruchomosci/' 
-      : 'https://www.otodom.pl';
-  }
+  const offerUrl = urlCheck.url;
 
   const checkLiveAvailability = async () => {
     setIsVerifying(true);
@@ -161,15 +149,7 @@ ${singleOfferDescription}`;
                   </span>
                   <span>Aktywne na żywo (200 OK)</span>
                 </span>
-              ) : (
-                <span 
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-300"
-                  title={liveInfo.message || 'Ogłoszenie wygasło, zostało usunięte lub przekierowuje do strony zbiorczej'}
-                >
-                  <AlertTriangle className="w-3 h-3 text-rose-600" />
-                  <span>{liveInfo.isTrap ? 'Pułapka 404 / Zbiorcza' : liveInfo.isArchived ? 'Nieaktualne / Archiwalne' : 'Wygasłe (404)'}</span>
-                </span>
-              )
+              ) : null
             ) : (
               <button
                 type="button"
@@ -369,27 +349,15 @@ ${singleOfferDescription}`;
         )}
 
         <div className="flex items-center gap-2">
-          {liveInfo && !liveInfo.isLive && (
-            <span 
-              className="text-[11px] font-semibold text-rose-700 bg-rose-50 px-2 py-1 rounded-md border border-rose-200"
-              title={liveInfo.message}
-            >
-              Wygasłe / 404
-            </span>
-          )}
           <a
             id={`property-link-${index}`}
             href={offerUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors shadow-xs group/link ${
-              liveInfo && !liveInfo.isLive
-                ? 'bg-neutral-600 hover:bg-neutral-700 text-white'
-                : 'bg-neutral-900 hover:bg-neutral-800 text-white'
-            }`}
-            title={liveInfo && !liveInfo.isLive ? 'Oferta wygasła lub została zarchiwizowana' : 'Przejdź wyłącznie do tej konkretnej oferty nieruchomości'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors shadow-xs group/link bg-neutral-900 hover:bg-neutral-800 text-white"
+            title="Przejdź wyłącznie do tej konkretnej oferty nieruchomości"
           >
-            <span>{liveInfo && !liveInfo.isLive ? 'Szukaj w portalu' : 'Zobacz tę ofertę'}</span>
+            <span>Zobacz tę ofertę</span>
             <ExternalLink className="w-3.5 h-3.5 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" />
           </a>
         </div>

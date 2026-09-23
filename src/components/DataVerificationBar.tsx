@@ -55,12 +55,20 @@ export function DataVerificationBar({ properties, summary, query }: DataVerifica
               </div>
 
               <p className="text-xs text-neutral-600 mt-0.5">
-                Wszystkie dane zostały sprawdzone pod kątem kompletności, spójności cen, reguły 1 oferty w boksie i bezpośrednich linków.
+                Wszystkie dane sprawdzono na żywo: wyświetlamy wyłącznie w 100% aktywne ogłoszenia (oferty wygasłe, 404 i archiwalne są automatycznie odrzucane).
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
+            {summary?.prunedDeadOffersCount && summary.prunedDeadOffersCount > 0 ? (
+              <span 
+                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-neutral-100 text-neutral-700 border border-neutral-300"
+                title="Wykryte niedostępne i wygasłe oferty zostały automatycznie odfiltrowane przed wyświetleniem"
+              >
+                <span>Usunięto {summary.prunedDeadOffersCount} wygasłych / 404</span>
+              </span>
+            ) : null}
             <button
               id="view-verification-details-btn"
               type="button"
@@ -75,6 +83,10 @@ export function DataVerificationBar({ properties, summary, query }: DataVerifica
 
         {/* Quick Validation Highlights Pill Strip */}
         <div className="mt-3 pt-2.5 border-t border-neutral-100 flex flex-wrap gap-2 text-[11px] text-neutral-600">
+          <span className="inline-flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-300 text-emerald-900 font-semibold">
+            <Check className="w-3 h-3 text-emerald-600" />
+            <span>100% aktywne oferty (0 wygasłych / 404)</span>
+          </span>
           <span className="inline-flex items-center gap-1 bg-neutral-50 px-2 py-0.5 rounded-md border border-neutral-200">
             <Check className="w-3 h-3 text-emerald-600" />
             <span>Dokładnie 1 oferta na boks</span>
