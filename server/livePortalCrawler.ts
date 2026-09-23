@@ -361,7 +361,21 @@ export async function fetchLiveOtodomOffers(params: CrawlParams, count = 15): Pr
         .replace(/<[^>]+>/g, ' ')
         .trim();
 
-      const floorLabel = item.floorNumber ? `${item.floorNumber} piętro` : 'Piętro w budynku';
+      const floorMap: Record<string, string> = {
+        'GROUND': 'Parter',
+        'FIRST': '1. piętro',
+        'SECOND': '2. piętro',
+        'THIRD': '3. piętro',
+        'FOURTH': '4. piętro',
+        'FIFTH': '5. piętro',
+        'SIXTH': '6. piętro',
+        'SEVENTH': '7. piętro',
+        'EIGHTH': '8. piętro',
+        'NINTH': '9. piętro',
+        'TENTH': '10. piętro'
+      };
+      const floorClean = item.floorNumber ? (floorMap[String(item.floorNumber).toUpperCase()] || `${item.floorNumber}. piętro`) : 'Piętro w budynku';
+      const floorLabel = floorClean;
 
       const prop: Property = {
         id: `otodom-live-${Date.now()}-${i}`,

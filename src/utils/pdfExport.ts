@@ -55,6 +55,35 @@ function cleanCardTitle(title?: string, maxLength = 100): string {
   return cut + '...';
 }
 
+/**
+ * Format floor string cleanly to Polish naming
+ */
+function formatFloorName(rawFloor?: string): string {
+  if (!rawFloor || rawFloor === 'N/A') return '';
+  const trimmed = rawFloor.trim();
+  const upper = trimmed.toUpperCase();
+  const floorMap: Record<string, string> = {
+    'GROUND': 'Parter',
+    'PARTER': 'Parter',
+    'FIRST': '1. piętro',
+    'SECOND': '2. piętro',
+    'THIRD': '3. piętro',
+    'FOURTH': '4. piętro',
+    'FIFTH': '5. piętro',
+    'SIXTH': '6. piętro',
+    'SEVENTH': '7. piętro',
+    'EIGHTH': '8. piętro',
+    'NINTH': '9. piętro',
+    'TENTH': '10. piętro'
+  };
+  for (const [key, val] of Object.entries(floorMap)) {
+    if (upper.includes(key)) {
+      return val;
+    }
+  }
+  return trimmed;
+}
+
 export async function exportPropertiesToPDF(
   properties: Property[],
   query: string,
@@ -83,13 +112,16 @@ export async function exportPropertiesToPDF(
   const phoneOffersCount = properties.filter(p => p.hasPhoneNumber || p.phoneNumber).length;
   const phonePercentage = Math.round((phoneOffersCount / totalOffers) * 100);
 
-  // Hidden off-screen staging container for pixel-perfect rendering
+  // Staging container: keep within viewport coordinates with opacity: 0
+  // to ensure browser layout & html2canvas render all backgrounds, fonts, and text without offscreen culling
   const container = document.createElement('div');
   container.style.position = 'fixed';
-  container.style.top = '-99999px';
-  container.style.left = '-99999px';
+  container.style.top = '0px';
+  container.style.left = '0px';
   container.style.width = '800px';
-  container.style.zIndex = '-1000';
+  container.style.zIndex = '-9999';
+  container.style.opacity = '0';
+  container.style.pointerEvents = 'none';
   container.style.backgroundColor = '#ffffff';
   container.style.color = '#0f172a';
   container.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
@@ -125,7 +157,7 @@ export async function exportPropertiesToPDF(
       const pageEl = document.createElement('div');
       pageEl.style.width = '800px';
       pageEl.style.height = '1131px';
-      pageEl.style.padding = '24px 34px 20px 34px';
+      pageEl.style.padding = '22px 34px 18px 34px';
       pageEl.style.boxSizing = 'border-box';
       pageEl.style.backgroundColor = '#ffffff';
       pageEl.style.display = 'flex';
@@ -138,66 +170,79 @@ export async function exportPropertiesToPDF(
       let headerHTML = '';
       if (isFirstPage) {
         headerHTML = `
-          <div style="border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 12px;">
-            <!-- Brand & Title Row -->
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div style="display: flex; align-items: center; gap: 9px;">
-                <div style="background-color: #0f172a; color: #ffffff; font-weight: 800; font-size: 13.5px; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 4px;">
-                  <span style="color: #10b981;">◆</span> PropFinder
-                </div>
-                <div>
-                  <h1 style="margin: 0; font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px; line-height: 1.2;">
-                    Raport Analityczny Nieruchomości
-                  </h1>
-                  <div style="font-size: 10.5px; color: #64748b; margin-top: 1px;">
-                    Zweryfikowane oferty z polskich portali (Otodom, OLX, Morizon, Gratka)
+          <div style="border-bottom: 2px solid #0f172a; padding-bottom: 11px; margin-bottom: 12px;">
+            <!-- Brand & Title Row (Table layout ensures bulletproof vertical alignment across browsers) -->
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+              <tr>
+                <td style="vertical-align: middle; text-align: left; padding: 0;">
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="background-color: #0f172a; color: #ffffff; font-weight: 800; font-size: 13px; line-height: 18px; padding: 5px 10px; border-radius: 6px; display: inline-block; vertical-align: middle; white-space: nowrap;">
+                      <span style="color: #10b981; margin-right: 4px;">◆</span>PropFinder
+                    </div>
+                    <div>
+                      <h1 style="margin: 0; padding: 0; font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px; line-height: 1.25;">
+                        Raport Analityczny Nieruchomości
+                      </h1>
+                      <div style="font-size: 10.5px; color: #64748b; line-height: 1.35; margin-top: 2px;">
+                        Zweryfikowane oferty z polskich portali (Otodom, OLX, Morizon, Gratka)
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div style="text-align: right; font-size: 11px; color: #475569; line-height: 1.4;">
-                <div>Data: <strong style="color: #0f172a;">${nowStr}</strong></div>
-                <div>Znaleziono: <strong style="color: #0f172a;">${totalOffers} ofert</strong></div>
-              </div>
-            </div>
+                </td>
+                <td style="vertical-align: middle; text-align: right; width: 190px; padding: 0;">
+                  <div style="font-size: 11px; color: #475569; line-height: 1.45;">
+                    <div>Data: <strong style="color: #0f172a;">${nowStr}</strong></div>
+                    <div>Znaleziono: <strong style="color: #0f172a;">${totalOffers} ${totalOffers === 1 ? 'ofertę' : (totalOffers < 5 ? 'oferty' : 'ofert')}</strong></div>
+                  </div>
+                </td>
+              </tr>
+            </table>
 
             <!-- Market Metrics & Search Criteria Strip -->
-            <div style="margin-top: 10px; padding: 8px 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <div style="font-size: 11.5px; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 530px;">
-                  <span style="color: #64748b; font-weight: 600;">Kryteria:</span> 
-                  <strong style="color: #0f172a; margin-left: 4px;">"${escapeHtml(query)}"</strong>
-                </div>
-                <div style="display: flex; gap: 6px; align-items: center;">
-                  <span style="background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 7px; border-radius: 5px; font-size: 10px; font-weight: 700;">
-                    ✓ Dane zweryfikowane
-                  </span>
-                  <span style="background-color: #e2e8f0; color: #0f172a; padding: 2px 7px; border-radius: 5px; font-size: 10px; font-weight: 600;">
-                    Filtr: ${escapeHtml(dealTypeFilter || 'Wszystkie')}
-                  </span>
-                </div>
-              </div>
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 9px 13px;">
+              <!-- Top Row: Criteria & Badges with ample line-height and no clipping -->
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 7px;">
+                <tr>
+                  <td style="vertical-align: middle; text-align: left; padding: 0;">
+                    <div style="font-size: 12px; line-height: 20px; color: #1e293b; max-width: 530px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0;">
+                      <span style="color: #64748b; font-weight: 600;">Kryteria:</span>
+                      <strong style="color: #0f172a; margin-left: 4px;">"${escapeHtml(query)}"</strong>
+                    </div>
+                  </td>
+                  <td style="vertical-align: middle; text-align: right; white-space: nowrap; padding: 0;">
+                    <span style="display: inline-block; vertical-align: middle; background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 3px 8px; border-radius: 5px; font-size: 10px; font-weight: 700; line-height: 14px; margin-right: 6px;">
+                      ✓ Dane zweryfikowane
+                    </span>
+                    <span style="display: inline-block; vertical-align: middle; background-color: #e2e8f0; color: #0f172a; padding: 3px 8px; border-radius: 5px; font-size: 10px; font-weight: 600; line-height: 14px;">
+                      Filtr: ${escapeHtml(dealTypeFilter || 'Wszystkie')}
+                    </span>
+                  </td>
+                </tr>
+              </table>
 
-              <!-- Market KPI Pills -->
-              <div style="display: flex; gap: 12px; font-size: 10.5px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 6px;">
-                ${minPrice && maxPrice ? `
+              <!-- Dashed separator with generous padding above and below so letters never touch it -->
+              <div style="border-top: 1px dashed #cbd5e1; margin-top: 2px; padding-top: 7px;">
+                <div style="display: flex; gap: 14px; font-size: 10.5px; line-height: 16px; color: #475569; flex-wrap: wrap;">
+                  ${minPrice && maxPrice ? `
+                    <div>
+                      <span style="color: #64748b;">Zakres cen:</span> 
+                      <strong style="color: #0f172a;">${minPrice.toLocaleString('pl-PL')} – ${maxPrice.toLocaleString('pl-PL')} PLN</strong>
+                    </div>
+                  ` : ''}
+                  ${avgM2Price ? `
+                    <div>
+                      <span style="color: #64748b;">Śr. stawka:</span> 
+                      <strong style="color: #0f172a;">~${avgM2Price.toLocaleString('pl-PL')} PLN/m²</strong>
+                    </div>
+                  ` : ''}
                   <div>
-                    <span style="color: #64748b;">Zakres cen:</span> 
-                    <strong style="color: #0f172a;">${minPrice.toLocaleString('pl-PL')} – ${maxPrice.toLocaleString('pl-PL')} PLN</strong>
+                    <span style="color: #64748b;">Bezpośredni telefon:</span> 
+                    <strong style="color: #047857;">${phoneOffersCount} (${phonePercentage}%)</strong>
                   </div>
-                ` : ''}
-                ${avgM2Price ? `
                   <div>
-                    <span style="color: #64748b;">Śr. stawka:</span> 
-                    <strong style="color: #0f172a;">~${avgM2Price.toLocaleString('pl-PL')} PLN/m²</strong>
+                    <span style="color: #64748b;">Ochrona linków:</span> 
+                    <strong style="color: #0284c7;">100% bezpośrednie 1:1</strong>
                   </div>
-                ` : ''}
-                <div>
-                  <span style="color: #64748b;">Bezpośredni telefon:</span> 
-                  <strong style="color: #047857;">${phoneOffersCount} (${phonePercentage}%)</strong>
-                </div>
-                <div>
-                  <span style="color: #64748b;">Ochrona linków:</span> 
-                  <strong style="color: #0284c7;">100% bezpośrednie 1:1</strong>
                 </div>
               </div>
             </div>
@@ -205,19 +250,25 @@ export async function exportPropertiesToPDF(
         `;
       } else {
         headerHTML = `
-          <div style="border-bottom: 1.5px solid #0f172a; padding-bottom: 7px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="background-color: #0f172a; color: #ffffff; font-weight: 800; font-size: 10px; padding: 2px 6px; border-radius: 4px;">
-                PropFinder
-              </span>
-              <span style="color: #0f172a; font-weight: 700;">Raport Wyszukiwania:</span>
-              <span style="color: #475569; font-weight: 500; max-width: 440px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                "${escapeHtml(query)}"
-              </span>
-            </div>
-            <div style="font-weight: 700; color: #64748b;">
-              Strona ${pageNum} z ${totalPages}
-            </div>
+          <div style="border-bottom: 1.5px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="vertical-align: middle; text-align: left; padding: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="background-color: #0f172a; color: #ffffff; font-weight: 800; font-size: 10.5px; line-height: 14px; padding: 2px 7px; border-radius: 4px; display: inline-block;">
+                      PropFinder
+                    </span>
+                    <span style="color: #0f172a; font-weight: 700; font-size: 11px; line-height: 16px;">Raport Wyszukiwania:</span>
+                    <span style="color: #475569; font-weight: 500; font-size: 11px; line-height: 16px; max-width: 440px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block;">
+                      "${escapeHtml(query)}"
+                    </span>
+                  </div>
+                </td>
+                <td style="vertical-align: middle; text-align: right; width: 120px; font-weight: 700; font-size: 11px; color: #64748b; padding: 0;">
+                  Strona ${pageNum} z ${totalPages}
+                </td>
+              </tr>
+            </table>
           </div>
         `;
       }
@@ -303,7 +354,7 @@ export async function exportPropertiesToPDF(
               <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; margin-bottom: 6px; display: flex; gap: 20px; font-size: 11px; color: #334155;">
                 <div><span style="color: #64748b;">Powierzchnia:</span> <strong>${escapeHtml(prop.area || '-')}</strong></div>
                 <div><span style="color: #64748b;">Liczba pokoi:</span> <strong>${escapeHtml(prop.rooms || '-')}</strong></div>
-                ${prop.floor && prop.floor !== 'N/A' ? `<div><span style="color: #64748b;">Piętro:</span> <strong>${escapeHtml(prop.floor)}</strong></div>` : ''}
+                ${prop.floor && prop.floor !== 'N/A' ? `<div><span style="color: #64748b;">Piętro:</span> <strong>${escapeHtml(formatFloorName(prop.floor))}</strong></div>` : ''}
               </div>
 
               <!-- Single-Offer Description Box -->
@@ -349,10 +400,9 @@ export async function exportPropertiesToPDF(
                   data-url="${escapeHtml(directUrl)}"
                   href="${escapeHtml(directUrl)}" 
                   target="_blank" 
-                  style="display: inline-flex; align-items: center; gap: 4px; background-color: #0f172a; color: #ffffff; padding: 5px 12px; border-radius: 6px; font-weight: 700; font-size: 10.5px; text-decoration: none;"
+                  style="display: inline-block; vertical-align: middle; background-color: #0f172a; color: #ffffff !important; padding: 5px 12px; border-radius: 6px; font-weight: 700; font-size: 10.5px; text-decoration: none; line-height: 16px; text-align: center; border: 1px solid #0f172a;"
                 >
-                  <span>Otwórz ofertę (${escapeHtml(prop.source || 'Portal')})</span>
-                  <span>↗</span>
+                  <span style="color: #ffffff !important; display: inline-block;">Otwórz ofertę (${escapeHtml(prop.source || 'Portal')}) ↗</span>
                 </a>
               </div>
             </div>
