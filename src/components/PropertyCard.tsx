@@ -99,6 +99,11 @@ ${singleOfferDescription}`;
   };
 
   const isRent = property.dealType?.toLowerCase().includes('wynaj') || property.dealType?.toLowerCase().includes('rent');
+  const isDeveloperOffer = Boolean(
+    property.isDeveloper || 
+    property.marketType === 'PRIMARY' || 
+    /dewelop|pierwotn|stan deweloperski/i.test(`${property.title} ${property.description} ${(property.features || []).join(' ')} ${property.contact || ''}`)
+  );
 
   return (
     <div 
@@ -113,15 +118,32 @@ ${singleOfferDescription}`;
         {/* Top Badges */}
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex flex-wrap items-center gap-2">
+            {isDeveloperOffer ? (
+              <span 
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-900 border border-purple-300 shadow-2xs"
+                title="Oferta bezpośrednio z rynku pierwotnego / od dewelopera. Zwolniona z 2% podatku PCC, brak prowizji pośrednika."
+              >
+                <span>🏗️ Od dewelopera</span>
+              </span>
+            ) : null}
+
             <span 
               className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                isRent 
+                isDeveloperOffer
+                  ? 'bg-purple-50 text-purple-800 border border-purple-200'
+                  : isRent 
                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
                   : 'bg-blue-50 text-blue-700 border border-blue-200'
               }`}
             >
-              {property.dealType || (isRent ? 'Wynajem' : 'Sprzedaż')}
+              {isDeveloperOffer ? 'Rynek pierwotny' : property.dealType || (isRent ? 'Wynajem' : 'Sprzedaż')}
             </span>
+
+            {property.developerName && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-800 border border-neutral-200">
+                {property.developerName}
+              </span>
+            )}
 
             {property.propertyType && (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-700 border border-neutral-200">

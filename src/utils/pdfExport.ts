@@ -304,8 +304,18 @@ export async function exportPropertiesToPDF(
                     #${globalIndex}
                   </span>
                   <span style="background-color: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px;">
-                    ${escapeHtml(prop.dealType || 'Oferta')}
+                    ${escapeHtml(prop.isDeveloper ? 'Rynek pierwotny' : (prop.dealType || 'Oferta'))}
                   </span>
+                  ${prop.isDeveloper ? `
+                    <span style="background-color: #faf5ff; color: #6b21a8; border: 1px solid #d8b4fe; font-size: 9.5px; font-weight: 800; padding: 2px 7px; border-radius: 6px;">
+                      🏗️ Od dewelopera
+                    </span>
+                  ` : ''}
+                  ${prop.developerName ? `
+                    <span style="background-color: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 6px;">
+                      ${escapeHtml(prop.developerName)}
+                    </span>
+                  ` : ''}
                   <span style="background-color: #f8fafc; color: #1e293b; border: 1px solid #cbd5e1; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 6px;">
                     ${escapeHtml(prop.propertyType || 'Mieszkanie')}
                   </span>

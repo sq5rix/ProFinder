@@ -1,4 +1,4 @@
-export type DealType = 'all' | 'Wynajem' | 'Sprzedaż';
+export type DealType = 'all' | 'Wynajem' | 'Sprzedaż' | 'Od dewelopera';
 
 export interface PropertyValidation {
   isFullyValid: boolean;
@@ -51,6 +51,10 @@ export interface Property {
   longitude?: number;
   validation?: PropertyValidation;
   liveVerification?: LiveVerificationInfo;
+  isDeveloper?: boolean;
+  marketType?: 'PRIMARY' | 'SECONDARY';
+  developerName?: string;
+  investmentName?: string;
 }
 
 export interface GroundingSource {

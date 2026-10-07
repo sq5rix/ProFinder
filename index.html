@@ -9,6 +9,22 @@
     <meta property="og:description" content="Finds rent or sale properties in the Polish market based on your prompt, powered by AI Google search." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Suppress Vite HMR WebSocket connection errors in sandbox iframe environment
+      window.addEventListener('error', function(e) {
+        if (e && (e.message?.includes('WebSocket') || e.filename?.includes('@vite/client'))) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function(e) {
+        var reason = e && (e.reason?.message || String(e.reason));
+        if (reason && (reason.includes('WebSocket') || reason.includes('@vite/client'))) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      }, true);
+    </script>
   </head>
   <body>
     <div id="root"></div>

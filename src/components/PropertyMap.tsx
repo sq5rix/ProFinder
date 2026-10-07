@@ -133,7 +133,8 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
     plottedProperties.forEach((item, index) => {
       const { property, lat, lng, priceShort } = item;
       const propId = property.id || `prop-${index}`;
-      const isRent = property.dealType?.toLowerCase().includes('wynaj') || property.dealType?.toLowerCase().includes('rent');
+      const isDev = Boolean(property.isDeveloper || property.marketType === 'PRIMARY');
+      const isRent = !isDev && (property.dealType?.toLowerCase().includes('wynaj') || property.dealType?.toLowerCase().includes('rent'));
       const hasPhone = Boolean(property.hasPhoneNumber || property.phoneNumber);
       const isSelected = selectedPropertyId === propId;
 
@@ -155,12 +156,14 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
           transition: transform 0.15s ease, box-shadow 0.15s ease;
           box-shadow: 0 3px 8px rgba(0,0,0,0.18);
           border: 2px solid #ffffff;
-          ${isRent 
+          ${isDev 
+            ? 'background-color: #7e22ce; color: #ffffff;' 
+            : isRent 
             ? 'background-color: #059669; color: #ffffff;' 
             : 'background-color: #2563eb; color: #ffffff;'}
           ${isSelected ? 'transform: scale(1.15); box-shadow: 0 0 0 3px #fbbf24, 0 8px 16px rgba(0,0,0,0.3); z-index: 1000;' : ''}
         ">
-          ${hasPhone ? '<span style="font-size: 10px;">📞</span>' : ''}
+          ${isDev ? '<span style="font-size: 10px;">🏗️</span>' : (hasPhone ? '<span style="font-size: 10px;">📞</span>' : '')}
           <span>${priceShort}</span>
         </div>
       `;
@@ -282,13 +285,25 @@ export const PropertyMap: React.FC<PropertyMapProps> = ({
           <div className="absolute bottom-4 left-4 right-4 sm:left-4 sm:right-auto sm:max-w-md z-[500] bg-white/98 backdrop-blur-md rounded-2xl shadow-xl border border-neutral-200 p-4 animate-in slide-in-from-bottom-3 duration-200">
             <div className="flex items-start justify-between gap-2 mb-2">
               <div className="flex items-center gap-2 flex-wrap">
+                {activeProperty.isDeveloper && (
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-300">
+                    🏗️ Od dewelopera
+                  </span>
+                )}
                 <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                  activeProperty.dealType?.toLowerCase().includes('wynaj') 
+                  activeProperty.isDeveloper
+                    ? 'bg-purple-50 text-purple-800 border border-purple-200'
+                    : activeProperty.dealType?.toLowerCase().includes('wynaj') 
                     ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
                     : 'bg-blue-50 text-blue-800 border border-blue-200'
                 }`}>
-                  {activeProperty.dealType || 'Oferta'}
+                  {activeProperty.isDeveloper ? 'Rynek pierwotny' : (activeProperty.dealType || 'Oferta')}
                 </span>
+                {activeProperty.developerName && (
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-neutral-100 text-neutral-800 border border-neutral-200">
+                    {activeProperty.developerName}
+                  </span>
+                )}
                 <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-neutral-100 text-neutral-700">
                   {activeProperty.propertyType}
                 </span>

@@ -8,6 +8,11 @@ interface FilterPresetsProps {
 
 const PRESETS: Array<{ label: string; query: string; dealType: DealType }> = [
   {
+    label: 'Warszawa: 2 pok. wynajem Bemowo (<3.5k zł)',
+    query: '2-pokojowe mieszkanie na wynajem Warszawa Bemowo z balkonem do 3500 zł',
+    dealType: 'Wynajem',
+  },
+  {
     label: 'Warszawa: 2 pok. wynajem Mokotów (<3.5k zł)',
     query: '2-pokojowe mieszkanie na wynajem Warszawa Mokotów z balkonem do 3500 zł',
     dealType: 'Wynajem',

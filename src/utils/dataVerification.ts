@@ -15,7 +15,8 @@ export function validateSingleProperty(property: Property, query?: string): Prop
   const priceStr = (property.price || '').toLowerCase();
   const hasCurrency = priceStr.includes('pln') || priceStr.includes('zł') || priceStr.includes('zl');
   const priceNum = property.priceNumeric || parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
-  const priceOk = hasCurrency && priceNum > 100;
+  const isDev = Boolean(property.isDeveloper || property.marketType === 'PRIMARY');
+  const priceOk = (hasCurrency && priceNum > 100) || (isDev && (priceStr.includes('deweloper') || priceStr.includes('zapytaj') || priceNum > 0));
   if (!priceOk) {
     warnings.push('Cena ogłoszenia nie zawiera poprawnej kwoty PLN.');
   }
@@ -32,7 +33,7 @@ export function validateSingleProperty(property: Property, query?: string): Prop
   const rooms = (property.rooms || '').toLowerCase();
   const areaOk = area.includes('m²') || area.includes('m2') || /\d+/.test(area);
   const roomsOk = rooms.length > 0 && !/^(brak|n\/a)$/i.test(rooms);
-  const areaAndRoomsOk = areaOk && roomsOk;
+  const areaAndRoomsOk = (areaOk && roomsOk) || (isDev && (areaOk || roomsOk));
   if (!areaAndRoomsOk) {
     warnings.push('Brak pełnych danych o powierzchni lub liczbie pokoi.');
   }

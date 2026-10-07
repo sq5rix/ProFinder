@@ -44,7 +44,7 @@ function cleanClientError(raw: string): string {
 }
 
 export default function App() {
-  const [query, setQuery] = useState('2-pokojowe mieszkanie na wynajem Warszawa Mokotów do 3500 zł');
+  const [query, setQuery] = useState('2-pokojowe mieszkanie na wynajem Warszawa Bemowo do 3500 zł');
   const [count, setCount] = useState(10);
   const [selectedDealType, setSelectedDealType] = useState<DealType>('all');
   const [properties, setProperties] = useState<Property[]>([]);

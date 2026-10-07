@@ -6,7 +6,7 @@ import { getFallbackProperties } from './server/fallbackProperties.ts';
 import { resolvePropertyCoordinates } from './src/utils/geocoding.ts';
 import { resolveDirectPropertyUrl, isSpecificPropertyUrl } from './src/utils/urlValidator.ts';
 import { verifyPropertiesLive, verifyUrlLive } from './server/liveUrlVerifier.ts';
-import { parseQueryCriteria, fetchRealLiveMarketOffers } from './server/livePortalCrawler.ts';
+import { parseQueryCriteria, fetchRealLiveMarketOffers, DISTRICT_CONFIGS } from './server/livePortalCrawler.ts';
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -284,7 +284,8 @@ async function startServer() {
       console.warn('[SearchEngine] Błąd silnika na żywo:', crawlErr?.message);
     }
 
-    if (livePortalOffers.length >= safeCount) {
+    // If live engine found valid authentic offers matching the district & budget, return them immediately!
+    if (livePortalOffers.length >= Math.min(safeCount, 3) || (livePortalOffers.length > 0 && criteria.district)) {
       console.log(`[SearchEngine] Sukces: Zwracanie ${livePortalOffers.length} w 100% aktywnych pojedynczych ogłoszeń pobranych wprost z portali!`);
       return res.json({
         properties: livePortalOffers.slice(0, safeCount),
@@ -566,6 +567,25 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
       }
     }
 
+    // Strict district filtering: eliminate any property that leaked in from another district
+    if (criteria.district) {
+      const targetConfig = DISTRICT_CONFIGS.find(d => d.key === criteria.district);
+      if (targetConfig) {
+        properties = properties.filter((p: any) => {
+          const locLower = (p.location || '').toLowerCase();
+          const titleLower = (p.title || '').toLowerCase();
+          for (const other of DISTRICT_CONFIGS) {
+            if (other.key === targetConfig.key) continue;
+            if (other.city !== targetConfig.city) continue;
+            if (locLower.includes(other.name.toLowerCase()) || titleLower.includes(` ${other.name.toLowerCase()}`)) {
+              return false;
+            }
+          }
+          return true;
+        });
+      }
+    }
+
     // Sort properties: prioritize active offers with direct phone numbers at the very top
     properties.sort((a: any, b: any) => {
       const aHas = a.hasPhoneNumber || (a.phoneNumber && a.phoneNumber.length > 0) ? 1 : 0;
@@ -599,7 +619,7 @@ Zwróć wyłącznie poprawny obiekt JSON (tablicę obiektów posortowaną tak, a
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);

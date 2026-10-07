@@ -48,36 +48,36 @@ export function isSpecificPropertyUrl(rawUrl?: string): boolean {
 
   // 2. Portal-Specific Direct Ad vs Category / 404 Cheat Checks
 
-  // Otodom:
+  // Otodom: Only genuine individual ad URLs contain /oferta/ and never /wyniki/ or cala-polska
   if (lower.includes('otodom.pl')) {
-    if (lower.includes('cala-polska') || lower.includes('from404')) {
+    if (lower.includes('cala-polska') || lower.includes('from404') || lower.includes('/wyniki/')) {
       return false;
     }
-    return true;
+    return lower.includes('/oferta/');
   }
 
   // OLX:
   if (lower.includes('olx.pl')) {
-    if (lower.includes('from404')) {
+    if (lower.includes('from404') || lower.includes('/nieruchomosci/') || lower.includes('/q-')) {
       return false;
     }
-    return true;
+    return lower.includes('/d/oferta/');
   }
 
   // Morizon:
   if (lower.includes('morizon.pl')) {
-    if (lower.includes('from404')) {
+    if (lower.includes('from404') || lower.includes('/do-wynajecia/') || lower.includes('/na-sprzedaz/')) {
       return false;
     }
-    return true;
+    return lower.includes('/oferta/');
   }
 
   // Gratka:
   if (lower.includes('gratka.pl')) {
-    if (lower.includes('from404')) {
+    if (lower.includes('from404') || lower.includes('/wynajem') || lower.includes('/sprzedaz')) {
       return false;
     }
-    return true;
+    return lower.includes('/ob/') || lower.includes('/ogloszenie/');
   }
 
   // Nieruchomości-online:
